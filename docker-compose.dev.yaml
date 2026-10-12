@@ -7,6 +7,7 @@ x-logging: &default-logging
 services:
   api:
     container_name: ${RAILS_CONTAINER_NAME}
+    image: ${RAILS_CONTAINER_NAME}
     build:
       context: .
       dockerfile: ${RAILS_DOCKERFILE}
@@ -25,9 +26,7 @@ services:
 
   waka:
     container_name: ${WAKA_CONTAINER_NAME}
-    build:
-      context: .
-      dockerfile: ${RAILS_DOCKERFILE}
+    image: ${RAILS_CONTAINER_NAME}
     env_file:
       - .env
     volumes:
@@ -35,6 +34,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      api:
+        condition: service_started
     command: ["./bin/jobs"]
     logging: *default-logging
 
@@ -57,9 +58,7 @@ services:
   # Media Worker [OPTIONAL] - processes :media queue only
   media:
     container_name: ${MEDIA_CONTAINER_NAME}
-    build:
-      context: .
-      dockerfile: ${RAILS_DOCKERFILE}
+    image: ${RAILS_CONTAINER_NAME}
     env_file:
       - .env
     volumes:
@@ -67,6 +66,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      api:
+        condition: service_started
     command: ["./bin/jobs", "-c", "config/queue.media.yml"]
     logging: *default-logging
 
