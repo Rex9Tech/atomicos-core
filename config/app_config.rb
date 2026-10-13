@@ -46,7 +46,9 @@ module AppConfig
   CORS_ORIGINS                = env_or.call("CORS_ORIGINS", "").split(",").map(&:strip).reject(&:empty?).freeze
   CORS_ALLOW_LOCALHOST        = env_or.call("CORS_ALLOW_LOCALHOST") == "true"
   # Extra hosts for production (comma-separated; AtomicOS re-apply).
-  APP_ALLOWED_HOSTS           = env_or.call("APP_ALLOWED_HOSTS", "").split(",").map(&:strip).reject(&:empty?).freeze
+  # Kept as a raw string — config/environments/production.rb does the splitting
+  # (ActiveSupport's Array#split would silently wrap an array, breaking it).
+  APP_ALLOWED_HOSTS           = env_or.call("APP_ALLOWED_HOSTS", "")
   CI                          = !env_or.call("CI").nil?
 
   # ----------------------------------------------------------------------------
