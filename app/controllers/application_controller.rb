@@ -48,6 +48,26 @@ class ApplicationController < ActionController::API
     key = session_key(current_user.id)
     active_token = CacheService.read(key)
 
+    # Graceful fallback for clients that cannot send X-Platform (e.g. native
+    # background upload workers): their request resolves to 'web' by default,
+    # but the token may be the active session of another platform
+    # (android/ios). Accept whenever the token EXACTLY matches any platform's
+    # stored token, and refresh that key instead. A superseded token never
+    # matches (keys only ever hold the latest token per platform), so
+    # single-active-session enforcement is preserved.
+    if active_token.blank? || active_token != bearer_token
+      fallback_key = AuthConstants::Platform::ALL.map { |platform|
+        AuthConstants::Session.key(current_user.id, platform)
+      }.find do |candidate|
+        candidate != key && CacheService.read(candidate) == bearer_token
+      end
+
+      if fallback_key.present?
+        key = fallback_key
+        active_token = bearer_token
+      end
+    end
+
     if active_token.blank? || active_token != bearer_token
       render_json_response(
         status_code: 401,
