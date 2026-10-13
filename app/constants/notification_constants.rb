@@ -83,9 +83,13 @@ module NotificationConstants
     IAM_UPDATED           = "iam_updated".freeze
     ACCESS_UPDATED        = "access_updated".freeze
     ACCESS_REVOKED        = "access_revoked".freeze
-    SESSION_EXPIRED       = "session_expired".freeze
-    SESSION_INVALIDATED   = "session_invalidated".freeze
-    NOTIFICATION          = "notification".freeze
+    SESSION_EXPIRED         = "session_expired".freeze
+    SESSION_INVALIDATED     = "session_invalidated".freeze
+    NOTIFICATION            = "notification".freeze
+    RECORDING_PROCESSING    = "recording_processing".freeze
+    RECORDING_COMPLETED     = "recording_completed".freeze
+    ATOM_UPDATED            = "atom_updated".freeze
+    ASSET_PROCESSED         = "asset_processed".freeze
   end
 
   module DefaultNotifications
