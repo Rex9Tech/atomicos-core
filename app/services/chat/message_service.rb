@@ -94,7 +94,7 @@ module Chat
         messages.size > 1 ? messages : messages.first
       end
 
-      def queue_ai_response!(user:, room:, content:, profile_key: nil)
+      def queue_ai_response!(user:, room:, content:, profile_key: nil, context: nil, system_prompt: nil, atom_id: nil, atom_title: nil)
         profile = Ai::ProfileService.resolve!(profile_key)
         chunks = Chat::TextService.chunk(content)
         split_id = chunks.size > 1 ? SecureRandom.uuid : nil
@@ -118,9 +118,12 @@ module Chat
 
             if is_last
               metadata["status"] = Chat::Message::STATUSES[:queued]
-              metadata["system_prompt"] = profile.system_prompt
+              metadata["system_prompt"] = system_prompt.presence || profile.system_prompt
               metadata["temperature"] = profile.temperature.to_f
               metadata["max_tokens"] = profile.max_output_tokens
+              metadata["context"] = context.presence
+              metadata["atom_id"] = atom_id.presence
+              metadata["atom_title"] = atom_title.presence&.to_s&.truncate(120)
 
               message = room.messages.create!(
                 role: AiConstants::ChatRole::USER,
@@ -270,7 +273,10 @@ module Chat
         payload = grouped.map { |item| { role: item[:role], content: item[:content] } }
 
         system_prompt = message.ai_system_prompt.presence || message.ai_profile&.system_prompt
-        payload.unshift(role: AiConstants::ChatRole::SYSTEM, content: system_prompt) if system_prompt.present?
+        context = message.ai_context.presence
+
+        combined_system = [ system_prompt, context ].compact_blank.join("\n\n")
+        payload.unshift(role: AiConstants::ChatRole::SYSTEM, content: combined_system) if combined_system.present?
 
         payload
       end

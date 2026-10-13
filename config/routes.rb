@@ -374,6 +374,23 @@ Rails.application.routes.draw do
       end
     end
 
+    # ===== AI (legacy mobile surface — bridges to the chat stack) =====
+    scope "ai", controller: "ai" do
+      post "chat", action: :create_chat
+      get "history", action: :read_history
+      delete "clear", action: :destroy_clear
+      put "rename", action: :update_rename
+      get "rooms", action: :read_rooms
+      post "rooms", action: :create_room
+      delete "rooms/:id", action: :destroy_room
+      post "summarize", action: :create_summarize
+      post "translate", action: :create_translate
+      post "analyze", action: :create_analyze
+      post "decisions", action: :create_decisions
+      post "tasks", action: :create_tasks
+      post "report", action: :create_report
+    end
+
     # ===== SPEECH =====
     post "speech/tts", to: "speech#create_tts"
     post "speech/stt", to: "speech#create_stt"

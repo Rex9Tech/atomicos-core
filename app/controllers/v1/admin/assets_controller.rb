@@ -690,7 +690,7 @@ class V1::Admin::AssetsController < V1::ApplicationController
 
     pattern = "%#{ActiveRecord::Base.sanitize_sql_like(search)}%"
     scope.where(
-      "assets.name ILIKE :search OR assets.title ILIKE :search OR assets.storage_key ILIKE :search OR assets.assetable_type ILIKE :search",
+      "assets.name ILIKE :search OR assets.storage_key ILIKE :search OR assets.assetable_type ILIKE :search",
       search: pattern
     )
   end

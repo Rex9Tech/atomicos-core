@@ -62,7 +62,11 @@ class V1::Chat::MessagesController < V1::ApplicationController
         user: current_user,
         room: @room,
         content: content,
-        profile_key: create_params[:profile_key]
+        profile_key: create_params[:profile_key],
+        context: create_params[:context],
+        system_prompt: create_params[:system_prompt],
+        atom_id: create_params[:atom_id],
+        atom_title: create_params[:atom_title]
       )
       serialized_messages = Chat::MessageSerializer.collection(result.messages)
 
@@ -175,7 +179,7 @@ class V1::Chat::MessagesController < V1::ApplicationController
   end
 
   def create_params
-    params.permit(:message, :room_id, :profile_key, :ai)
+    params.permit(:message, :room_id, :profile_key, :ai, :context, :system_prompt, :atom_id, :atom_title)
   end
 
   def update_params

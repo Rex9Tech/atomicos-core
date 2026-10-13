@@ -36,7 +36,6 @@ class Asset < ApplicationRecord
   validate :child_asset_type_immutable, on: :update
   validate :parent_asset_validations
 
-  before_validation :set_default_title
   before_validation :set_extension_and_format
   after_destroy_commit :delete_from_storage, if: :uploaded_file?
 
@@ -74,7 +73,7 @@ class Asset < ApplicationRecord
   end
 
   def display_name
-    title.presence || name
+    name
   end
 
   def storage_url(options = {})
@@ -278,9 +277,5 @@ class Asset < ApplicationRecord
 
   def image_type?
     AssetConstants::AssetType::IMAGE_TYPES.include?(type)
-  end
-
-  def set_default_title
-    self.title = name if title.blank? && name.present?
   end
 end

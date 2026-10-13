@@ -30,6 +30,7 @@ class User < ApplicationRecord
 
   before_create :generate_confirmation_code
   after_create :assign_default_user_role, if: -> { roles.empty? }
+  after_create :ensure_default_category
   after_create :create_default_referral_coupon
   after_destroy :cleanup_stripe_customer, if: -> { stripe_customer_id.present? }
 
@@ -205,5 +206,15 @@ class User < ApplicationRecord
     rescue => e
       Rails.logger.warn("[User] Could not delete Stripe customer #{stripe_customer_id}: #{e.message}")
     end
+  end
+
+  # Every user starts with a "General" molecule so the workspace is never
+  # empty on first sign-in. Best-effort: a failure must not break signup.
+  def ensure_default_category
+    return if categories.exists?
+
+    categories.create!(name: "General")
+  rescue StandardError => e
+    Rails.logger.warn("[USER] default category failed for #{id}: #{e.message}")
   end
 end
