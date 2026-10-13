@@ -13,8 +13,7 @@ class V1::AtomsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: atom_message(MessageService::Atom::ATOMS_FETCHED),
-      data: AtomSerializer.paginated(records, pagy),
-      pagy: pagy
+      **AtomSerializer.collection_pagy(records, pagy)
     )
   end
 

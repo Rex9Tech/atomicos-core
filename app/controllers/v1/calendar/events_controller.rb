@@ -11,8 +11,7 @@ class V1::Calendar::EventsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: calendar_message(MessageService::Calendar::EVENTS_FETCHED),
-      data: CalendarEventSerializer.paginated(records, pagy),
-      pagy: pagy
+      **CalendarEventSerializer.collection_pagy(records, pagy)
     )
   end
 

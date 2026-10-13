@@ -4,7 +4,7 @@ module Ai
   class Profile < ApplicationRecord
     self.table_name = "ai_profiles"
 
-    has_many :runs, class_name: "Ai::Run", dependent: :restrict_with_error
+    has_many :runs, class_name: "Ai::Run", foreign_key: :ai_profile_id, dependent: :restrict_with_error
     has_many :chat_messages, class_name: "Chat::Message", foreign_key: :ai_profile_id, dependent: :nullify
 
     validates :key, presence: true, uniqueness: true,

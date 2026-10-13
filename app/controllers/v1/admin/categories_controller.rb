@@ -12,8 +12,7 @@ class V1::Admin::CategoriesController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: category_message(MessageService::Category::CATEGORIES_FETCHED),
-      data: CategorySerializer.paginated(records, pagy),
-      pagy: pagy
+      **CategorySerializer.collection_pagy(records, pagy)
     )
   end
 
