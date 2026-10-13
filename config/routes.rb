@@ -338,6 +338,12 @@ Rails.application.routes.draw do
       end
     end
 
+    # Legacy upload path kept for already-installed mobile builds, which POST
+    # to /v1/media/upload (ServerRoutes.uploadAsset). Canonical path going
+    # forward is /v1/assets/upload; both must stay served or background
+    # uploads (recordings audio, attachments) 404 on the device.
+    post "media/upload", to: "assets#create_upload"
+
     # ===== PAYMENTS - CLIENT =====
     namespace :payment do
       resources :products, only: %i[index show]
