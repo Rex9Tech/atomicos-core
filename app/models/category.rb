@@ -19,7 +19,17 @@ class Category < ApplicationRecord
   # composite unique index).
   def ensure_slug
     base = slug.presence || name.to_s.parameterize
-    return if base.blank?
+
+    # Non-latin names (e.g. Burmese) parameterize to an empty string, which
+    # used to fail the `slug presence` validation ("Slug can't be blank").
+    # Keep a unicode-safe slug instead of giving up.
+    if base.blank?
+      base = name.to_s
+                 .downcase
+                 .gsub(/[^\p{L}\p{N}]+/, "-")
+                 .gsub(/\A-+|-+\z/, "")
+    end
+    base = "molecule" if base.blank?
 
     candidate = base
     suffix = 1
