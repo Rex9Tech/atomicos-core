@@ -1,0 +1,41 @@
+<%#
+# Navigation override (AtomicOS)
+#
+# Based on administrate/application/_navigation.html.erb with:
+# - an AtomicOS brand mark at the top
+# - a "Sign out" link for the session-based admin login
+# - "Back to app" kept for quick access to the user-facing app
+%>
+
+<nav class="navigation">
+  <div class="navigation__brand">Atomic<span>OS</span></div>
+
+  <%= link_to(t("administrate.navigation.back_to_app"), root_url, class: "button button--alt button--nav") if defined?(root_url) %>
+
+  <% Administrate::Namespace.new(namespace).resources_with_index_route.each do |resource| %>
+    <%= link_to(
+      display_resource_name(resource),
+      resource_index_route(resource),
+      class: "navigation__link navigation__link--#{nav_link_state(resource)}"
+    ) if accessible_action?(model_from_resource(resource), :index) %>
+  <% end %>
+
+  <% if defined?(admin_signed_in?) && admin_signed_in? %>
+    <%= link_to("Sign out", admin_signout_path, class: "button button--alt button--nav navigation__signout") %>
+  <% end %>
+</nav>
+
+<style>
+  .navigation__brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 4px 12px;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: #ffffff;
+  }
+  .navigation__brand span { color: #22C55E; }
+  .navigation__signout { margin-top: 12px; opacity: 0.92; }
+</style>

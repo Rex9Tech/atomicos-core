@@ -1,25 +1,25 @@
 /* app/assets/stylesheets/admin.css */
 
 /* =========================================================
-   RexOne Design Tokens (Dark Theme)
-   Brand Neon Scarlet: #FF2238 | Surface: #160b11 | Cards: #1f1018
+   AtomicOS Design Tokens (Dark Theme)
+   Brand Green: #22C55E | Surface: #0E1B13 | Cards: #10231A
    ========================================================= */
 
 :root {
-  --rex-primary: #FF2238;
-  --rex-primary-light: #FF5263;
-  --rex-primary-dark: #CC1125;
-  --rex-glow: rgba(255, 34, 56, 0.4);
-  --rex-glow-subtle: rgba(255, 34, 56, 0.15);
-  --rex-bg: #120c11;
-  --rex-surface: #180f16;
-  --rex-card: #20131d;
-  --rex-card-hover: #291825;
-  --rex-border: #381928;
-  --rex-border-glow: rgba(255, 34, 56, 0.45);
+  --rex-primary: #22C55E;
+  --rex-primary-light: #4ADE80;
+  --rex-primary-dark: #15803D;
+  --rex-glow: rgba(34, 197, 94, 0.4);
+  --rex-glow-subtle: rgba(34, 197, 94, 0.15);
+  --rex-bg: #0A1710;
+  --rex-surface: #0F1F16;
+  --rex-card: #13261A;
+  --rex-card-hover: #1A3322;
+  --rex-border: #23412E;
+  --rex-border-glow: rgba(34, 197, 94, 0.45);
   --rex-text: #ffffff;
-  --rex-text-muted: #c9b8be;
-  --rex-text-subtle: #8a777e;
+  --rex-text-muted: #C7D8CC;
+  --rex-text-subtle: #8FA79D;
   --rex-success: #10B981;
   --rex-warning: #F59E0B;
   --rex-error: #EF4444;
@@ -76,7 +76,7 @@ a:hover {
   font-size: 1.5rem !important;
   font-weight: 700 !important;
   letter-spacing: -0.02em !important;
-  text-shadow: 0 0 16px rgba(255, 34, 56, 0.25);
+  text-shadow: 0 0 16px rgba(34, 197, 94, 0.25);
 }
 
 .main-content__body {
@@ -124,24 +124,24 @@ a:hover {
 .navigation__link:hover {
   color: #ffffff !important;
   background: var(--rex-card) !important;
-  border-color: rgba(255, 34, 56, 0.3) !important;
+  border-color: rgba(34, 197, 94, 0.3) !important;
   transform: translateX(2px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .navigation__link--active {
   color: #ffffff !important;
-  background: linear-gradient(135deg, rgba(255, 34, 56, 0.22), rgba(204, 17, 37, 0.12)) !important;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.22), rgba(21, 128, 61, 0.12)) !important;
   border-color: var(--rex-primary) !important;
   font-weight: 600 !important;
-  box-shadow: 0 0 12px rgba(255, 34, 56, 0.2), inset 0 0 8px rgba(255, 34, 56, 0.1) !important;
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.2), inset 0 0 8px rgba(34, 197, 94, 0.1) !important;
 }
 
 .navigation__link--active:hover {
   color: #ffffff !important;
-  background: linear-gradient(135deg, rgba(255, 34, 56, 0.28), rgba(204, 17, 37, 0.18)) !important;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.28), rgba(21, 128, 61, 0.18)) !important;
   border-color: var(--rex-primary-light) !important;
-  box-shadow: 0 0 16px rgba(255, 34, 56, 0.35) !important;
+  box-shadow: 0 0 16px rgba(34, 197, 94, 0.35) !important;
 }
 
 /* =========================================================
@@ -215,7 +215,7 @@ input[type="submit"],
   font-size: 0.875rem !important;
   padding: 0.6rem 1.25rem !important;
   border: 1px solid rgba(255, 255, 255, 0.15) !important;
-  box-shadow: 0 2px 10px rgba(255, 34, 56, 0.3) !important;
+  box-shadow: 0 2px 10px rgba(34, 197, 94, 0.3) !important;
   cursor: pointer !important;
   transition: all 0.15s ease !important;
 }
@@ -225,7 +225,7 @@ button:hover,
 input[type="submit"]:hover,
 .button--primary:hover {
   background: linear-gradient(135deg, var(--rex-primary-light), var(--rex-primary)) !important;
-  box-shadow: 0 4px 18px rgba(255, 34, 56, 0.5) !important;
+  box-shadow: 0 4px 18px rgba(34, 197, 94, 0.5) !important;
   transform: translateY(-1px) !important;
 }
 
@@ -233,7 +233,7 @@ input[type="submit"]:hover,
 button:active,
 input[type="submit"]:active {
   transform: translateY(1px) !important;
-  box-shadow: 0 1px 5px rgba(255, 34, 56, 0.2) !important;
+  box-shadow: 0 1px 5px rgba(34, 197, 94, 0.2) !important;
 }
 
 .button--secondary {
@@ -286,7 +286,7 @@ textarea:focus,
 select:focus {
   border-color: var(--rex-primary) !important;
   outline: none !important;
-  box-shadow: 0 0 0 3px rgba(255, 34, 56, 0.25) !important;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25) !important;
 }
 
 .search__input {
@@ -299,7 +299,7 @@ select:focus {
 
 .search__input:focus {
   border-color: var(--rex-primary) !important;
-  box-shadow: 0 0 0 3px rgba(255, 34, 56, 0.25) !important;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25) !important;
 }
 
 /* =========================================================
@@ -317,7 +317,7 @@ select:focus {
 .selectize-input.focus,
 .selectize-input.dropdown-active {
   border-color: var(--rex-primary) !important;
-  box-shadow: 0 0 0 3px rgba(255, 34, 56, 0.25) !important;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25) !important;
 }
 
 .selectize-dropdown {
@@ -350,9 +350,9 @@ select:focus {
 
 .flash-error,
 .flash-alert {
-  background: rgba(255, 34, 56, 0.12) !important;
-  border: 1px solid rgba(255, 34, 56, 0.35) !important;
-  color: #FFA3AF !important;
+  background: rgba(34, 197, 94, 0.12) !important;
+  border: 1px solid rgba(34, 197, 94, 0.35) !important;
+  color: #86EFAC !important;
   border-radius: 0.5rem !important;
   padding: 0.75rem 1rem !important;
   margin-bottom: 1rem !important;
@@ -392,7 +392,7 @@ select:focus {
   font-size: 1.5rem !important;
   font-weight: 700 !important;
   letter-spacing: -0.02em !important;
-  text-shadow: 0 0 16px rgba(255, 34, 56, 0.25) !important;
+  text-shadow: 0 0 16px rgba(34, 197, 94, 0.25) !important;
 }
 
 .swui-nav {
@@ -415,16 +415,16 @@ select:focus {
 .swui-nav__link:hover {
   color: #ffffff !important;
   background: var(--rex-card) !important;
-  border-color: rgba(255, 34, 56, 0.3) !important;
+  border-color: rgba(34, 197, 94, 0.3) !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
 }
 
 .swui-nav__link--active {
   color: #ffffff !important;
-  background: linear-gradient(135deg, rgba(255, 34, 56, 0.22), rgba(204, 17, 37, 0.12)) !important;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.22), rgba(21, 128, 61, 0.12)) !important;
   border-color: var(--rex-primary) !important;
   font-weight: 600 !important;
-  box-shadow: 0 0 12px rgba(255, 34, 56, 0.25) !important;
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.25) !important;
 }
 
 .swui-card,
@@ -439,14 +439,14 @@ select:focus {
 
 .swui-card:hover,
 .swui-stat-card:hover {
-  border-color: rgba(255, 34, 56, 0.4) !important;
-  box-shadow: 0 6px 24px rgba(255, 34, 56, 0.15) !important;
+  border-color: rgba(34, 197, 94, 0.4) !important;
+  box-shadow: 0 6px 24px rgba(34, 197, 94, 0.15) !important;
 }
 
 .swui-stat__value {
   color: #ffffff !important;
   font-weight: 700 !important;
-  text-shadow: 0 0 10px rgba(255, 34, 56, 0.2) !important;
+  text-shadow: 0 0 10px rgba(34, 197, 94, 0.2) !important;
 }
 
 .swui-stat__label {
@@ -506,9 +506,9 @@ select:focus {
 
 .swui-badge--failed,
 .swui-badge--error {
-  background: rgba(255, 34, 56, 0.15) !important;
-  color: #FF5263 !important;
-  border: 1px solid rgba(255, 34, 56, 0.3) !important;
+  background: rgba(34, 197, 94, 0.15) !important;
+  color: #4ADE80 !important;
+  border: 1px solid rgba(34, 197, 94, 0.3) !important;
 }
 
 .swui-refresh-bar {

@@ -43,6 +43,11 @@ Rails.application.routes.draw do
   # Separate from the versioned application API.
   # Administrate is intended for Super Admin access.
   namespace :admin do
+    # Session-based sign-in for the admin console (replaces the raw Basic popup)
+    get "signin", to: "sessions#new", as: :signin
+    post "signin", to: "sessions#create"
+    get "signout", to: "sessions#destroy", as: :signout
+
     resources :users, only: %i[index show new create edit update destroy]
     resources :assets, only: %i[index show new create edit update destroy]
     resources :accesses, only: %i[index show new create edit update destroy]

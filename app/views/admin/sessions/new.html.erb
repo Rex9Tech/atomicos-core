@@ -1,0 +1,66 @@
+<% content_for :title, "Sign in" %>
+
+<div class="card">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="32" cy="32" r="5.2" fill="#34D399"/>
+      <ellipse cx="32" cy="32" rx="26" ry="11" stroke="url(#atomicos-g)" stroke-width="2"/>
+      <ellipse cx="32" cy="32" rx="26" ry="11" stroke="url(#atomicos-g)" stroke-width="2" transform="rotate(60 32 32)"/>
+      <ellipse cx="32" cy="32" rx="26" ry="11" stroke="url(#atomicos-g)" stroke-width="2" transform="rotate(-60 32 32)"/>
+      <defs>
+        <linearGradient id="atomicos-g" x1="6" y1="21" x2="58" y2="43" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#22C55E"/>
+          <stop offset="1" stop-color="#34D399" stop-opacity="0.55"/>
+        </linearGradient>
+      </defs>
+    </svg>
+    <div>
+      <div class="wordmark">Atomic<em>OS</em></div>
+      <div class="tagline">Admin Console</div>
+    </div>
+  </div>
+
+  <% if flash.now[:alert].present? %>
+    <div class="alert" role="alert">
+      <span class="alert-dot"></span>
+      <span><%= flash.now[:alert] %></span>
+    </div>
+  <% end %>
+
+  <%= form_with url: admin_signin_path, method: :post, html: { autocomplete: "on" } do %>
+    <div class="field">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" value="<%= @username.to_s %>"
+             autocomplete="username" autocapitalize="off" spellcheck="false" autofocus required>
+    </div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <div class="pw">
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <button type="button" class="pw-toggle" id="pw-toggle" onclick="togglePassword()" aria-label="Toggle password visibility">SHOW</button>
+      </div>
+    </div>
+
+    <button type="submit" class="submit">Sign in</button>
+  <% end %>
+
+  <div class="foot">
+    <span>Restricted area — authorized staff only</span>
+    <span class="chip">AtomicOS</span>
+  </div>
+</div>
+
+<script>
+  function togglePassword() {
+    var input = document.getElementById("password");
+    var btn = document.getElementById("pw-toggle");
+    if (input.type === "password") {
+      input.type = "text";
+      btn.textContent = "HIDE";
+    } else {
+      input.type = "password";
+      btn.textContent = "SHOW";
+    }
+  }
+</script>
