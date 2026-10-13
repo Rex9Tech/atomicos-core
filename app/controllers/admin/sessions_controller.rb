@@ -20,7 +20,7 @@ module Admin
     def create
       user = AdminAuthService.authenticate(
         username: params[:username].to_s,
-        password: params[:password].to_s,
+        password: params[:password].to_s.strip,
         ip: request.remote_ip
       )
 
