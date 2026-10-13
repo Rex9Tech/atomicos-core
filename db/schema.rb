@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_06_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_13_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "uuid-ossp"
@@ -563,7 +563,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_000003) do
     t.uuid "undiscarded_by_id"
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
+    t.string "clients", default: ["web", "mobile"], null: false, array: true
+    t.string "cta_text"
+    t.jsonb "metadata", default: {}
     t.index ["category"], name: "index_notifications_on_category"
+    t.index ["clients"], name: "index_notifications_on_clients", using: :gin
     t.index ["created_by_id"], name: "index_notifications_on_created_by_id"
     t.index ["discarded_at"], name: "index_notifications_on_discarded_at"
     t.index ["discarded_by_id"], name: "index_notifications_on_discarded_by_id"
@@ -1327,6 +1331,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_000003) do
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
     t.uuid "user_id", null: false
+    t.string "clients", default: ["web", "mobile"], null: false, array: true
+    t.jsonb "metadata", default: {}, null: false
+    t.string "operation_id"
+    t.string "operation_type"
+    t.string "operation_status"
+    t.index ["clients"], name: "index_user_notifications_on_clients", using: :gin
     t.index ["created_by_id"], name: "index_user_notifications_on_created_by_id"
     t.index ["discarded_at"], name: "index_user_notifications_on_discarded_at"
     t.index ["discarded_by_id"], name: "index_user_notifications_on_discarded_by_id"
@@ -1334,6 +1344,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_06_000003) do
     t.index ["undiscarded_by_id"], name: "index_user_notifications_on_undiscarded_by_id"
     t.index ["updated_by_id"], name: "index_user_notifications_on_updated_by_id"
     t.index ["user_id", "created_at"], name: "index_user_notifications_on_user_id_and_created_at"
+    t.index ["user_id", "operation_id"], name: "index_user_notifications_on_user_id_and_operation_id"
     t.index ["user_id", "read_at"], name: "index_user_notifications_on_user_id_and_read_at"
     t.index ["user_id"], name: "index_user_notifications_on_user_id"
   end
