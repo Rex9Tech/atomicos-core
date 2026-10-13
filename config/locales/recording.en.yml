@@ -1,0 +1,10 @@
+en:
+  recording:
+    title_required: "Title is required"
+    title_parameter_missing: "Missing title parameter"
+    created: "Recording started"
+    updated: "Recording updated"
+    finished: "Recording finished"
+    fetched: "Recording"
+    not_found: "Recording not found"
+    update_failed: "Could not update recording"

@@ -35,17 +35,27 @@ Rails.application.configure do
   # Mount Action Cable outside main process or domain.
   # config.action_cable.mount_path = nil
   # config.action_cable.url = "wss://example.com/cable"
-  # config.action_cable.allowed_request_origins = [ "http://example.com", /http:\/\/example.*/ ]
+  # Action Cable allowed origins in production
+  config.action_cable.allowed_request_origins = [
+    ENV["RAILS_CLIENT_BASE_URL"],
+    %r{\Ahttps?://([a-zA-Z0-9-]+\.)?rexone\.me\z},
+    %r{\Ahttp://localhost:\d+\z},
+    %r{\Ahttp://127\.0\.0\.1:\d+\z}
+  ].compact
 
-  # Assume all access to the app is happening through a SSL-terminating reverse proxy.
+  # Native mobile clients (Flutter) send no Origin header; the JWT token in
+  # ?token= authenticates them, so CSRF origin checks must be disabled.
+  config.action_cable.disable_request_forgery_protection = true
+
+  # Assume all access to the app is happening through a SSL-terminating reverse proxy (Traefik/Coolify).
   # Can be used together with config.force_ssl for Strict-Transport-Security and secure cookies.
-  # config.assume_ssl = true
+  config.assume_ssl = true
 
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
-  config.force_ssl = true # NOTE: this has been commented as default
+  config.force_ssl = true
 
-  # Skip http-to-https redirect for the default health check endpoint.
-  # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
+  # Skip http-to-https redirect for the default health check endpoint so Docker healthcheck succeeds.
+  config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
 
   # Log to STDOUT with the current request id as a default log tag.
   config.log_tags = [ :request_id ]
@@ -53,7 +63,7 @@ Rails.application.configure do
   config.solid_queue.logger = config.logger
 
   # Change to "debug" to log everything (including potentially personally-identifiable information!).
-  config.log_level = ENV.fetch("RAILS_LOG_LEVEL", "info")
+  config.log_level = AppConfig::RAILS_LOG_LEVEL
 
   # Prevent health checks from clogging up the logs.
   config.silence_healthcheck_path = "/up"
@@ -86,7 +96,7 @@ Rails.application.configure do
   config.action_mailer.raise_delivery_errors = true
 
   # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: ENV["RAILS_SERVER_HOST"], protocol: "https" }
+  config.action_mailer.default_url_options = { host: AppConfig::RAILS_SERVER_HOST, protocol: "https" }
 
   # Specify outgoing SMTP server. Remember to add smtp/* credentials via bin/rails credentials:edit.
   # config.action_mailer.smtp_settings = {
@@ -100,11 +110,11 @@ Rails.application.configure do
   # SMTP settings
   config.action_mailer.delivery_method = :smtp
   config.action_mailer.smtp_settings = {
-    address:              ENV["SMTP_ADDRESS"],
-    port:                 ENV["SMTP_PORT"],
-    domain:               ENV["SMTP_DOMAIN"],
-    user_name:            ENV["SMTP_USERNAME"],
-    password:             ENV["SMTP_PASSWORD"],
+    address:              AppConfig::SMTP_ADDRESS,
+    port:                 AppConfig::SMTP_PORT,
+    domain:               AppConfig::SMTP_DOMAIN,
+    user_name:            AppConfig::SMTP_USERNAME,
+    password:             AppConfig::SMTP_PASSWORD,
     authentication:       "plain",
     enable_starttls_auto: true
   }
@@ -123,8 +133,18 @@ Rails.application.configure do
   config.hosts = [
     /localhost:\d+/,   # Allow requests from localhost with any port
     "rexone.me",     # Allow requests from rexone.me
-    /.+\.rexone\.me/ # Allow requests from subdomains like `www.rexone.me`
+    /.+\.rexone\.me/, # Allow requests from subdomains like `www.rexone.me`
+    /.+\.onrender\.com/, # Allow Render demo/test deployments (e.g. atomicos-core.onrender.com)
+    /.+\.sslip\.io/, # Allow Coolify auto-assigned domains (e.g. xxx.187.53.137.72.sslip.io)
+    /.+\.khantsithu\.tech/ # Custom domains (e.g. atomicos-core.khantsithu.tech)
   ]
+
+  # Additional hosts can be supplied without a code change:
+  # APP_ALLOWED_HOSTS="api.example.com,other.example.com"
+  config.hosts += AppConfig::APP_ALLOWED_HOSTS
+                       .split(",")
+                       .map(&:strip)
+                       .reject(&:empty?)
 
   # Skip DNS rebinding protection for the default health check endpoint.
   # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }

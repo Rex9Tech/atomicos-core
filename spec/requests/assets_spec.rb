@@ -43,12 +43,13 @@ RSpec.describe "Asset uploads", type: :request do
       assetable_id: user.id,
       type: "avatar",
       storage_key: "profile/avatar",
+      name: "avatar.png",
       format: "image",
       source: "upload"
     )
     expect(StorageService::Client).to have_received(:upload).with(
       kind_of(ActionDispatch::Http::UploadedFile),
-      hash_including(folder: "user_uploads/avatar", resource_type: "image")
+      hash_including(resource_type: "image", storage_key: a_string_matching(/\Auser\/#{user.id}\/avatar_/))
     )
   end
 
@@ -65,19 +66,19 @@ RSpec.describe "Asset uploads", type: :request do
     expect(StorageService::Client).to have_received(:upload).with(anything, hash_including(resource_type: "raw"))
   end
 
-  it "queues remote cleanup when the uploaded result cannot be saved" do
+  it "cleans up remote storage when the uploaded result cannot be saved" do
     existing = create(:asset, url: "https://cdn.example.com/taken.png")
     allow(StorageService::Client).to receive(:upload).and_return(
       storage_key: "profile/new", url: existing.url, bytes: 11, format: "png", resource_type: "image"
     )
-    allow(StorageService::Client).to receive(:delete_later)
+    allow(StorageService::Client).to receive(:delete)
 
     expect do
       post "/v1/media/upload", params: { file: file }, headers: headers
     end.not_to change(Asset, :count)
 
     expect(response).to have_http_status(:unprocessable_content)
-    expect(StorageService::Client).to have_received(:delete_later).with("profile/new", resource_type: "image")
+    expect(StorageService::Client).to have_received(:delete).with("profile/new", resource_type: "image")
   end
 
   it "returns a server error without persisting when storage fails" do
@@ -88,6 +89,24 @@ RSpec.describe "Asset uploads", type: :request do
     end.not_to change(Asset, :count)
     expect(response).to have_http_status(:internal_server_error)
     expect(response_status["error"]).to eq("storage offline")
+  end
+
+  it "rejects files exceeding maximum size with localized error message" do
+    allow_any_instance_of(ActionDispatch::Http::UploadedFile).to receive(:size).and_return(MediaConstants::MAX_NON_VIDEO_SIZE_MB.megabytes + 1)
+
+    post "/v1/media/upload", params: { file: file }, headers: headers
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response_status["error"]).to eq("File size exceeds maximum allowed limit (#{MediaConstants::MAX_NON_VIDEO_SIZE_MB}MB)")
+  end
+
+  it "returns localized error message in Burmese when X-Locale is my" do
+    allow_any_instance_of(ActionDispatch::Http::UploadedFile).to receive(:size).and_return(MediaConstants::MAX_NON_VIDEO_SIZE_MB.megabytes + 1)
+
+    post "/v1/media/upload", params: { file: file }, headers: headers.merge("X-Locale" => "my")
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response_status["error"]).to eq("ဖိုင်အရွယ်အစားသည် သတ်မှတ်ထားသော ကန့်သတ်ချက်ထက် ကျော်လွန်နေပါသည် (#{MediaConstants::MAX_NON_VIDEO_SIZE_MB}MB)")
   end
 
   def grant_asset_create_permission(account)

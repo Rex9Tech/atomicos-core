@@ -53,7 +53,7 @@ Iam::Permission.find_each do |perm|
   Iam::RolePermission.create!(role: super_admin, permission: perm)
 end
 
-# Admin: ALL permissions EXCEPT User and IAM management
+# Admin: ALL permissions EXCEPT User, IAM, version, and user version management
 Iam::Permission.where.not(resource: IamConstants::Role::RESTRICTED_FOR_ADMIN).find_each do |perm|
   Iam::RolePermission.create!(role: admin, permission: perm)
 end
@@ -123,6 +123,17 @@ User.find_each do |user|
 end
 
 puts "✅ #{User.count} users have roles assigned"
+
+# ===== DEFAULT NOTIFICATIONS =====
+puts "🌱 Seeding default notifications..."
+
+NotificationConstants::DefaultNotifications::ALL.each do |noti_data|
+  noti = Notification.find_or_initialize_by(event: noti_data[:event])
+  noti.assign_attributes(noti_data)
+  noti.save!
+end
+
+puts "✅ #{Notification.count} notifications ready"
 
 puts "✅ Seeding complete!"
 

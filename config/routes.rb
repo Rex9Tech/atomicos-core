@@ -2,8 +2,11 @@
 Rails.application.routes.draw do
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
-  # Defines the root path route ("/")
-  # root "posts#index"
+  # The core is an API — opening its domain in a browser lands on the web app.
+  root to: redirect(
+    ENV.fetch("RAILS_CLIENT_BASE_URL", "https://atomicos-web.khantsithu.tech"),
+    status: 302
+  )
 
   # Default Action Cable mounts the WebSocket server at /cable
   mount ActionCable.server => "/cable"
@@ -39,6 +42,11 @@ Rails.application.routes.draw do
     resources :assets, only: %i[index show new create edit update destroy]
     resources :accesses, only: %i[index show new create edit update destroy]
     resources :feedbacks, only: %i[index show new create edit update destroy]
+    namespace :client do
+      resources :logs, only: %i[index show new create edit update destroy]
+      resources :versions, only: %i[index show new create edit update destroy]
+      resources :user_versions, only: %i[index show]
+    end
 
     namespace :iam do
       resources :permissions, only: %i[index show new create edit update destroy]
@@ -59,9 +67,7 @@ Rails.application.routes.draw do
       resources :messages, only: %i[index show new create edit update destroy]
     end
 
-    namespace :log do
-      resources :clients, only: %i[index show new create edit update destroy]
-    end
+    resources :notifications, only: %i[index show new create edit update destroy]
 
     root to: "users#index"
   end
@@ -102,9 +108,8 @@ Rails.application.routes.draw do
   # API V1 - All API routes should be API-only (no new/edit)
   # ============================================================
   namespace :v1 do
-    # Client Logging
-    namespace :log do
-      resources :clients, only: [ :create, :index, :show, :destroy ] do
+    namespace :client do
+      resources :logs, only: [ :create, :index, :show, :destroy ] do
         member do
           put :update_resolve, path: "resolve"
           put :update_unresolve, path: "unresolve"
@@ -112,11 +117,14 @@ Rails.application.routes.draw do
           post :undiscard
         end
       end
+      get "versions/current", to: "versions#read_current"
+      post "versions/user-version", to: "user_versions#create_install"
     end
 
     # ===== USERS =====
     get "users/current", to: "users#read_current_user"
     get "users/current/iam", to: "users#read_current_iam"
+    put "users/current", to: "users#update_current_user"
 
     # ===== ADMIN API =====
     # React Admin Dashboard.
@@ -127,10 +135,19 @@ Rails.application.routes.draw do
         collection do
           get :read_discarded, path: "discarded"
           post :create_upload, path: "upload"
+          get :read_storage_stats, path: "storage_stats"
+          delete :destroy_bin, path: "bin"
+          post :discard_batch
+          post :undiscard_batch
+          post :destroy_batch
         end
         member do
           post :discard
           post :undiscard
+          post :update_compress, path: "compress"
+          get :read_download, path: "download"
+          post :update_thumbnail_regenerate, path: "thumbnail/regenerate"
+          post :update_thumbnail_upload, path: "thumbnail/upload"
         end
       end
 
@@ -183,9 +200,12 @@ Rails.application.routes.draw do
         end
       end
 
-      resources :notifications, only: %i[create] do
+      resources :notifications do
         collection do
-          get :read_templates, path: "templates"
+          post :dispatch, action: :create_dispatch
+        end
+        member do
+          post :undiscard
         end
       end
 
@@ -193,7 +213,40 @@ Rails.application.routes.draw do
 
       resources :feedbacks, only: %i[index show update destroy]
 
+      resources :categories, only: %i[index create update destroy] do
+        member do
+          post :discard
+          post :undiscard
+        end
+      end
+
+      namespace :client do
+        resources :versions, only: %i[index show create update] do
+          collection do
+            get :read_discarded, path: "discarded"
+            get "user_versions", to: "user_versions#index"
+          end
+
+          member do
+            get :read_user_versions, path: "user_versions"
+            post :discard
+            post :undiscard
+          end
+        end
+      end
+
       get "analytics/overview", to: "analytics#read_overview"
+    end
+
+    # ===== NOTIFICATIONS (User In-App) =====
+    resources :notifications, only: %i[index destroy] do
+      collection do
+        get :read_unread_count, path: "unread_count"
+        put :update_read_all, path: "read_all"
+      end
+      member do
+        put :update_read, path: "read"
+      end
     end
 
     # ===== FEEDBACK =====
@@ -267,9 +320,42 @@ Rails.application.routes.draw do
     post "ai/summarize", to: "ai#create_summarize"
     post "ai/translate", to: "ai#create_translate"
     post "ai/analyze", to: "ai#create_analyze"
+    post "ai/decisions", to: "ai#create_decisions"
+    post "ai/tasks", to: "ai#create_tasks"
+    post "ai/report", to: "ai#create_report"
 
     # ===== SPEECH =====
     post "speech/tts", to: "speech#create_tts"
     post "speech/stt", to: "speech#create_stt"
+
+    # ===== ATOMS =====
+    resources :atoms do
+      collection do
+        post :create_from_note, path: "from-note"
+        post :create_from_url, path: "from-url"
+        post :create_from_asset, path: "from-asset"
+        post :create_from_share, path: "from-share"
+      end
+      member do
+        get :read_assets, path: "assets"
+        post :create_asset, path: "assets"
+        delete "assets/:asset_id", to: "atoms#destroy_asset"
+      end
+    end
+
+    # ===== CATEGORIES (personal taxonomy; every user manages their own) =====
+    resources :categories, only: %i[index create update destroy]
+
+    # ===== RECORDINGS =====
+    resources :recordings do
+      member do
+        post :create_finish, path: "finish"
+      end
+    end
+
+    # ===== CALENDAR =====
+    namespace :calendar do
+      resources :events, only: [ :index, :show, :create, :update, :destroy ]
+    end
   end
 end

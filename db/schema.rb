@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_06_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "uuid-ossp"
@@ -45,18 +45,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
   end
 
   create_table "assets", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "assetable_id"
+    t.string "assetable_type"
     t.datetime "created_at", null: false
     t.uuid "created_by_id"
     t.datetime "discarded_at"
     t.uuid "discarded_by_id"
     t.integer "duration_secs"
     t.string "extension"
+    t.text "extracted_text"
     t.string "format"
     t.string "name", null: false
-    t.uuid "assetable_id"
-    t.string "assetable_type"
+    t.uuid "parent_asset_id"
     t.bigint "size_bytes"
     t.string "source", default: "upload", null: false
+    t.string "status", default: "pending", null: false
     t.string "storage_key"
     t.string "type", default: "general", null: false
     t.datetime "undiscarded_at"
@@ -64,15 +67,101 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
     t.string "url", null: false
+    t.index ["assetable_type", "assetable_id"], name: "index_assets_on_assetable_type_and_assetable_id"
     t.index ["created_by_id"], name: "index_assets_on_created_by_id"
     t.index ["discarded_at"], name: "index_assets_on_discarded_at"
     t.index ["discarded_by_id"], name: "index_assets_on_discarded_by_id"
     t.index ["name"], name: "index_assets_on_name"
-    t.index ["assetable_type", "assetable_id"], name: "index_assets_on_assetable_type_and_assetable_id"
+    t.index ["parent_asset_id"], name: "index_assets_on_parent_asset_id", unique: true
+    t.index ["status"], name: "index_assets_on_status"
     t.index ["type"], name: "index_assets_on_type"
     t.index ["undiscarded_by_id"], name: "index_assets_on_undiscarded_by_id"
     t.index ["updated_by_id"], name: "index_assets_on_updated_by_id"
     t.index ["url"], name: "index_assets_on_url", unique: true
+  end
+
+  create_table "atoms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "category_id"
+    t.datetime "created_at", null: false
+    t.uuid "created_by_id"
+    t.datetime "discarded_at"
+    t.uuid "discarded_by_id"
+    t.integer "duration_secs"
+    t.datetime "meeting_at"
+    t.jsonb "metadata", default: {}
+    t.text "note"
+    t.integer "participants_count"
+    t.string "recording_status"
+    t.uuid "room_id"
+    t.string "source", default: "note", null: false
+    t.string "status", default: "draft", null: false
+    t.jsonb "summary_blocks", default: []
+    t.string "title", null: false
+    t.jsonb "transcript_segments", default: []
+    t.datetime "undiscarded_at"
+    t.uuid "undiscarded_by_id"
+    t.datetime "updated_at", null: false
+    t.uuid "updated_by_id"
+    t.uuid "user_id", null: false
+    t.index ["category_id"], name: "index_atoms_on_category_id"
+    t.index ["created_by_id"], name: "index_atoms_on_created_by_id"
+    t.index ["discarded_at"], name: "index_atoms_on_discarded_at"
+    t.index ["discarded_by_id"], name: "index_atoms_on_discarded_by_id"
+    t.index ["room_id"], name: "index_atoms_on_room_id"
+    t.index ["status"], name: "index_atoms_on_status"
+    t.index ["undiscarded_by_id"], name: "index_atoms_on_undiscarded_by_id"
+    t.index ["updated_by_id"], name: "index_atoms_on_updated_by_id"
+    t.index ["user_id", "created_at"], name: "index_atoms_on_user_id_and_created_at"
+    t.index ["user_id"], name: "index_atoms_on_user_id"
+  end
+
+  create_table "calendar_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.uuid "created_by_id"
+    t.text "description"
+    t.datetime "discarded_at"
+    t.uuid "discarded_by_id"
+    t.datetime "end_at"
+    t.jsonb "metadata", default: {}
+    t.datetime "start_at"
+    t.string "status", default: "scheduled", null: false
+    t.string "title", null: false
+    t.datetime "undiscarded_at"
+    t.uuid "undiscarded_by_id"
+    t.datetime "updated_at", null: false
+    t.uuid "updated_by_id"
+    t.uuid "user_id", null: false
+    t.index ["created_by_id"], name: "index_calendar_events_on_created_by_id"
+    t.index ["discarded_at"], name: "index_calendar_events_on_discarded_at"
+    t.index ["discarded_by_id"], name: "index_calendar_events_on_discarded_by_id"
+    t.index ["undiscarded_by_id"], name: "index_calendar_events_on_undiscarded_by_id"
+    t.index ["updated_by_id"], name: "index_calendar_events_on_updated_by_id"
+    t.index ["user_id", "start_at"], name: "index_calendar_events_on_user_id_and_start_at"
+    t.index ["user_id"], name: "index_calendar_events_on_user_id"
+  end
+
+  create_table "categories", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.uuid "created_by_id"
+    t.string "description"
+    t.datetime "discarded_at"
+    t.uuid "discarded_by_id"
+    t.string "name", null: false
+    t.integer "position", default: 0, null: false
+    t.string "slug", null: false
+    t.datetime "undiscarded_at"
+    t.uuid "undiscarded_by_id"
+    t.datetime "updated_at", null: false
+    t.uuid "updated_by_id"
+    t.uuid "user_id"
+    t.index ["created_by_id"], name: "index_categories_on_created_by_id"
+    t.index ["discarded_at"], name: "index_categories_on_discarded_at"
+    t.index ["discarded_by_id"], name: "index_categories_on_discarded_by_id"
+    t.index ["position"], name: "index_categories_on_position"
+    t.index ["undiscarded_by_id"], name: "index_categories_on_undiscarded_by_id"
+    t.index ["updated_by_id"], name: "index_categories_on_updated_by_id"
+    t.index ["user_id", "slug"], name: "index_categories_on_user_id_and_slug", unique: true
+    t.index ["user_id"], name: "index_categories_on_user_id"
   end
 
   create_table "chat_messages", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -98,6 +187,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
   end
 
   create_table "chat_rooms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "category_id"
     t.datetime "created_at", null: false
     t.uuid "created_by_id"
     t.datetime "discarded_at"
@@ -109,18 +199,122 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
     t.uuid "user_id", null: false
+    t.index ["category_id"], name: "index_chat_rooms_on_category_id"
     t.index ["created_by_id"], name: "index_chat_rooms_on_created_by_id"
     t.index ["discarded_at"], name: "index_chat_rooms_on_discarded_at"
     t.index ["discarded_by_id"], name: "index_chat_rooms_on_discarded_by_id"
     t.index ["undiscarded_by_id"], name: "index_chat_rooms_on_undiscarded_by_id"
     t.index ["updated_by_id"], name: "index_chat_rooms_on_updated_by_id"
+    t.index ["user_id", "category_id"], name: "index_chat_rooms_on_user_and_category_unique", unique: true, where: "((category_id IS NOT NULL) AND (discarded_at IS NULL))"
     t.index ["user_id", "created_at"], name: "index_chat_rooms_on_user_id_and_created_at"
     t.index ["user_id"], name: "index_chat_rooms_on_user_id"
   end
 
+  create_table "client_logs", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "browser"
+    t.jsonb "context", default: {}
+    t.jsonb "cookies", default: {}
+    t.datetime "created_at", null: false
+    t.uuid "created_by_id"
+    t.string "device"
+    t.datetime "discarded_at"
+    t.string "environment"
+    t.datetime "last_occurred_at"
+    t.jsonb "local_storage_keys", default: []
+    t.string "message", null: false
+    t.string "method"
+    t.integer "occurrence_count", default: 1
+    t.string "os"
+    t.string "os_version"
+    t.string "platform"
+    t.string "request_id"
+    t.datetime "resolved_at"
+    t.uuid "resolved_by_id"
+    t.jsonb "session_storage_keys", default: []
+    t.string "severity", default: "error", null: false
+    t.jsonb "stack_trace", default: []
+    t.datetime "updated_at", null: false
+    t.uuid "updated_by_id"
+    t.string "url"
+    t.string "user_agent"
+    t.uuid "user_id"
+    t.uuid "version_id"
+    t.index ["created_at"], name: "index_client_logs_on_created_at"
+    t.index ["created_by_id"], name: "index_client_logs_on_created_by_id"
+    t.index ["discarded_at"], name: "index_client_logs_on_discarded_at"
+    t.index ["environment"], name: "index_client_logs_on_environment"
+    t.index ["local_storage_keys"], name: "index_client_logs_on_local_storage_keys", using: :gin
+    t.index ["platform", "severity"], name: "index_client_logs_on_platform_and_severity"
+    t.index ["platform"], name: "index_client_logs_on_platform"
+    t.index ["resolved_at"], name: "index_client_logs_on_resolved_at"
+    t.index ["resolved_by_id"], name: "index_client_logs_on_resolved_by_id"
+    t.index ["session_storage_keys"], name: "index_client_logs_on_session_storage_keys", using: :gin
+    t.index ["severity"], name: "index_client_logs_on_severity"
+    t.index ["updated_by_id"], name: "index_client_logs_on_updated_by_id"
+    t.index ["user_id", "created_at"], name: "index_client_logs_on_user_id_and_created_at"
+    t.index ["user_id"], name: "index_client_logs_on_user_id"
+    t.index ["version_id"], name: "index_client_logs_on_version_id"
+  end
+
+  create_table "client_user_versions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.integer "build_number"
+    t.datetime "created_at", null: false
+    t.uuid "created_by_id"
+    t.datetime "discarded_at"
+    t.uuid "discarded_by_id"
+    t.datetime "last_seen_at", null: false
+    t.string "number", null: false
+    t.string "platform", null: false
+    t.datetime "undiscarded_at"
+    t.uuid "undiscarded_by_id"
+    t.datetime "updated_at", null: false
+    t.uuid "updated_by_id"
+    t.uuid "user_id", null: false
+    t.uuid "version_id"
+    t.index ["created_by_id"], name: "index_client_user_versions_on_created_by_id"
+    t.index ["discarded_at"], name: "index_client_user_versions_on_discarded_at"
+    t.index ["discarded_by_id"], name: "index_client_user_versions_on_discarded_by_id"
+    t.index ["last_seen_at"], name: "index_client_user_versions_on_last_seen_at"
+    t.index ["number"], name: "index_client_user_versions_on_number"
+    t.index ["undiscarded_by_id"], name: "index_client_user_versions_on_undiscarded_by_id"
+    t.index ["updated_by_id"], name: "index_client_user_versions_on_updated_by_id"
+    t.index ["user_id", "platform"], name: "index_client_user_versions_on_user_id_and_platform_kept", unique: true, where: "(discarded_at IS NULL)"
+    t.index ["user_id"], name: "index_client_user_versions_on_user_id"
+    t.index ["version_id"], name: "index_client_user_versions_on_version_id"
+  end
+
+  create_table "client_versions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.integer "android_build_number"
+    t.datetime "created_at", null: false
+    t.uuid "created_by_id"
+    t.text "description"
+    t.datetime "discarded_at"
+    t.uuid "discarded_by_id"
+    t.integer "ios_build_number"
+    t.boolean "is_force_update", default: false, null: false
+    t.string "number", null: false
+    t.datetime "released_at"
+    t.string "status", default: "draft", null: false
+    t.string "title", null: false
+    t.datetime "undiscarded_at"
+    t.uuid "undiscarded_by_id"
+    t.datetime "updated_at", null: false
+    t.uuid "updated_by_id"
+    t.index ["android_build_number"], name: "index_client_versions_on_android_build_number_kept", unique: true, where: "((discarded_at IS NULL) AND (android_build_number IS NOT NULL))"
+    t.index ["created_by_id"], name: "index_client_versions_on_created_by_id"
+    t.index ["discarded_at"], name: "index_client_versions_on_discarded_at"
+    t.index ["discarded_by_id"], name: "index_client_versions_on_discarded_by_id"
+    t.index ["ios_build_number"], name: "index_client_versions_on_ios_build_number_kept", unique: true, where: "((discarded_at IS NULL) AND (ios_build_number IS NOT NULL))"
+    t.index ["number"], name: "index_client_versions_on_number_kept", unique: true, where: "(discarded_at IS NULL)"
+    t.index ["released_at"], name: "index_client_versions_on_released_at"
+    t.index ["status"], name: "index_client_versions_on_one_published_kept", unique: true, where: "(((status)::text = 'published'::text) AND (discarded_at IS NULL))"
+    t.index ["status"], name: "index_client_versions_on_status"
+    t.index ["undiscarded_by_id"], name: "index_client_versions_on_undiscarded_by_id"
+    t.index ["updated_by_id"], name: "index_client_versions_on_updated_by_id"
+  end
+
   create_table "feedbacks", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.text "admin_notes"
-    t.string "app_version"
     t.string "browser"
     t.string "category", default: "general", null: false
     t.text "content", null: false
@@ -140,6 +334,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
     t.uuid "user_id"
+    t.uuid "version_id"
     t.index ["category"], name: "index_feedbacks_on_category"
     t.index ["created_at"], name: "index_feedbacks_on_created_at"
     t.index ["created_by_id"], name: "index_feedbacks_on_created_by_id"
@@ -152,6 +347,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
     t.index ["undiscarded_by_id"], name: "index_feedbacks_on_undiscarded_by_id"
     t.index ["updated_by_id"], name: "index_feedbacks_on_updated_by_id"
     t.index ["user_id"], name: "index_feedbacks_on_user_id"
+    t.index ["version_id"], name: "index_feedbacks_on_version_id"
   end
 
   create_table "iam_permissions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -237,49 +433,39 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
     t.index ["user_id"], name: "index_iam_user_roles_on_user_id"
   end
 
-  create_table "log_clients", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.string "app_version"
-    t.string "browser"
-    t.jsonb "context", default: {}
-    t.jsonb "cookies", default: {}
+  create_table "notifications", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.boolean "admin", default: true, null: false
+    t.string "category", default: "broadcast", null: false
     t.datetime "created_at", null: false
     t.uuid "created_by_id"
-    t.string "device"
+    t.text "description"
     t.datetime "discarded_at"
-    t.string "environment"
-    t.datetime "last_occurred_at"
-    t.jsonb "local_storage_keys", default: []
-    t.string "message", null: false
-    t.string "method"
-    t.integer "occurrence_count", default: 1
-    t.string "os"
-    t.string "os_version"
-    t.string "platform"
-    t.string "request_id"
-    t.datetime "resolved_at"
-    t.uuid "resolved_by_id"
-    t.jsonb "session_storage_keys", default: []
-    t.string "severity", default: "error", null: false
-    t.jsonb "stack_trace", default: []
+    t.uuid "discarded_by_id"
+    t.text "email_body"
+    t.string "email_subject"
+    t.string "email_template_id"
+    t.string "event", null: false
+    t.text "in_app_body"
+    t.jsonb "in_app_data", default: {}
+    t.string "in_app_title"
+    t.string "link"
+    t.string "name", null: false
+    t.text "push_body"
+    t.string "push_template_id"
+    t.string "push_title"
+    t.integer "read_count", default: 0, null: false
+    t.integer "sent_count", default: 0, null: false
+    t.datetime "undiscarded_at"
+    t.uuid "undiscarded_by_id"
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
-    t.string "url"
-    t.string "user_agent"
-    t.uuid "user_id"
-    t.index ["created_at"], name: "index_log_clients_on_created_at"
-    t.index ["created_by_id"], name: "index_log_clients_on_created_by_id"
-    t.index ["discarded_at"], name: "index_log_clients_on_discarded_at"
-    t.index ["environment"], name: "index_log_clients_on_environment"
-    t.index ["local_storage_keys"], name: "index_log_clients_on_local_storage_keys", using: :gin
-    t.index ["platform", "severity"], name: "index_log_clients_on_platform_and_severity"
-    t.index ["platform"], name: "index_log_clients_on_platform"
-    t.index ["resolved_at"], name: "index_log_clients_on_resolved_at"
-    t.index ["resolved_by_id"], name: "index_log_clients_on_resolved_by_id"
-    t.index ["session_storage_keys"], name: "index_log_clients_on_session_storage_keys", using: :gin
-    t.index ["severity"], name: "index_log_clients_on_severity"
-    t.index ["updated_by_id"], name: "index_log_clients_on_updated_by_id"
-    t.index ["user_id", "created_at"], name: "index_log_clients_on_user_id_and_created_at"
-    t.index ["user_id"], name: "index_log_clients_on_user_id"
+    t.index ["category"], name: "index_notifications_on_category"
+    t.index ["created_by_id"], name: "index_notifications_on_created_by_id"
+    t.index ["discarded_at"], name: "index_notifications_on_discarded_at"
+    t.index ["discarded_by_id"], name: "index_notifications_on_discarded_by_id"
+    t.index ["event"], name: "index_notifications_on_event"
+    t.index ["undiscarded_by_id"], name: "index_notifications_on_undiscarded_by_id"
+    t.index ["updated_by_id"], name: "index_notifications_on_updated_by_id"
   end
 
   create_table "payment_products", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -792,6 +978,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
     t.index ["summarizable_type", "summarizable_id"], name: "index_rails_pulse_summaries_on_summarizable"
   end
 
+  create_table "recordings", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "atom_id"
+    t.datetime "created_at", null: false
+    t.uuid "created_by_id"
+    t.datetime "discarded_at"
+    t.uuid "discarded_by_id"
+    t.integer "duration_secs"
+    t.datetime "ended_at"
+    t.jsonb "metadata", default: {}
+    t.datetime "started_at"
+    t.string "status", default: "recording", null: false
+    t.string "title", null: false
+    t.datetime "undiscarded_at"
+    t.uuid "undiscarded_by_id"
+    t.datetime "updated_at", null: false
+    t.uuid "updated_by_id"
+    t.uuid "user_id", null: false
+    t.index ["atom_id"], name: "index_recordings_on_atom_id"
+    t.index ["created_by_id"], name: "index_recordings_on_created_by_id"
+    t.index ["discarded_at"], name: "index_recordings_on_discarded_at"
+    t.index ["discarded_by_id"], name: "index_recordings_on_discarded_by_id"
+    t.index ["status"], name: "index_recordings_on_status"
+    t.index ["undiscarded_by_id"], name: "index_recordings_on_undiscarded_by_id"
+    t.index ["updated_by_id"], name: "index_recordings_on_updated_by_id"
+    t.index ["user_id", "created_at"], name: "index_recordings_on_user_id_and_created_at"
+    t.index ["user_id"], name: "index_recordings_on_user_id"
+  end
+
   create_table "solid_cable_messages", force: :cascade do |t|
     t.binary "channel", null: false
     t.bigint "channel_hash", null: false
@@ -963,6 +1177,33 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
     t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
+  create_table "user_notifications", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.uuid "created_by_id"
+    t.jsonb "data", default: {}, null: false
+    t.datetime "discarded_at"
+    t.uuid "discarded_by_id"
+    t.string "link"
+    t.text "message", null: false
+    t.uuid "notification_id"
+    t.datetime "read_at"
+    t.string "title", null: false
+    t.datetime "undiscarded_at"
+    t.uuid "undiscarded_by_id"
+    t.datetime "updated_at", null: false
+    t.uuid "updated_by_id"
+    t.uuid "user_id", null: false
+    t.index ["created_by_id"], name: "index_user_notifications_on_created_by_id"
+    t.index ["discarded_at"], name: "index_user_notifications_on_discarded_at"
+    t.index ["discarded_by_id"], name: "index_user_notifications_on_discarded_by_id"
+    t.index ["notification_id"], name: "index_user_notifications_on_notification_id"
+    t.index ["undiscarded_by_id"], name: "index_user_notifications_on_undiscarded_by_id"
+    t.index ["updated_by_id"], name: "index_user_notifications_on_updated_by_id"
+    t.index ["user_id", "created_at"], name: "index_user_notifications_on_user_id_and_created_at"
+    t.index ["user_id", "read_at"], name: "index_user_notifications_on_user_id_and_read_at"
+    t.index ["user_id"], name: "index_user_notifications_on_user_id"
+  end
+
   create_table "users", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "confirmation_code"
     t.datetime "confirmation_sent_at"
@@ -1014,20 +1255,55 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
   add_foreign_key "accesses", "users", column: "discarded_by_id"
   add_foreign_key "accesses", "users", column: "undiscarded_by_id"
   add_foreign_key "accesses", "users", column: "updated_by_id"
+  add_foreign_key "assets", "assets", column: "parent_asset_id"
   add_foreign_key "assets", "users", column: "created_by_id"
   add_foreign_key "assets", "users", column: "discarded_by_id"
   add_foreign_key "assets", "users", column: "undiscarded_by_id"
   add_foreign_key "assets", "users", column: "updated_by_id"
+  add_foreign_key "atoms", "categories", on_delete: :nullify
+  add_foreign_key "atoms", "chat_rooms", column: "room_id"
+  add_foreign_key "atoms", "users"
+  add_foreign_key "atoms", "users", column: "created_by_id"
+  add_foreign_key "atoms", "users", column: "discarded_by_id"
+  add_foreign_key "atoms", "users", column: "undiscarded_by_id"
+  add_foreign_key "atoms", "users", column: "updated_by_id"
+  add_foreign_key "calendar_events", "users"
+  add_foreign_key "calendar_events", "users", column: "created_by_id"
+  add_foreign_key "calendar_events", "users", column: "discarded_by_id"
+  add_foreign_key "calendar_events", "users", column: "undiscarded_by_id"
+  add_foreign_key "calendar_events", "users", column: "updated_by_id"
+  add_foreign_key "categories", "users"
+  add_foreign_key "categories", "users", column: "created_by_id"
+  add_foreign_key "categories", "users", column: "discarded_by_id"
+  add_foreign_key "categories", "users", column: "undiscarded_by_id"
+  add_foreign_key "categories", "users", column: "updated_by_id"
   add_foreign_key "chat_messages", "chat_rooms", column: "room_id"
   add_foreign_key "chat_messages", "users", column: "created_by_id"
   add_foreign_key "chat_messages", "users", column: "discarded_by_id"
   add_foreign_key "chat_messages", "users", column: "undiscarded_by_id"
   add_foreign_key "chat_messages", "users", column: "updated_by_id"
+  add_foreign_key "chat_rooms", "categories", on_delete: :nullify
   add_foreign_key "chat_rooms", "users"
   add_foreign_key "chat_rooms", "users", column: "created_by_id"
   add_foreign_key "chat_rooms", "users", column: "discarded_by_id"
   add_foreign_key "chat_rooms", "users", column: "undiscarded_by_id"
   add_foreign_key "chat_rooms", "users", column: "updated_by_id"
+  add_foreign_key "client_logs", "client_versions", column: "version_id", on_delete: :nullify
+  add_foreign_key "client_logs", "users"
+  add_foreign_key "client_logs", "users", column: "created_by_id"
+  add_foreign_key "client_logs", "users", column: "resolved_by_id"
+  add_foreign_key "client_logs", "users", column: "updated_by_id"
+  add_foreign_key "client_user_versions", "client_versions", column: "version_id", on_delete: :nullify
+  add_foreign_key "client_user_versions", "users"
+  add_foreign_key "client_user_versions", "users", column: "created_by_id"
+  add_foreign_key "client_user_versions", "users", column: "discarded_by_id"
+  add_foreign_key "client_user_versions", "users", column: "undiscarded_by_id"
+  add_foreign_key "client_user_versions", "users", column: "updated_by_id"
+  add_foreign_key "client_versions", "users", column: "created_by_id"
+  add_foreign_key "client_versions", "users", column: "discarded_by_id"
+  add_foreign_key "client_versions", "users", column: "undiscarded_by_id"
+  add_foreign_key "client_versions", "users", column: "updated_by_id"
+  add_foreign_key "feedbacks", "client_versions", column: "version_id", on_delete: :nullify
   add_foreign_key "feedbacks", "users"
   add_foreign_key "iam_permissions", "users", column: "created_by_id"
   add_foreign_key "iam_permissions", "users", column: "discarded_by_id"
@@ -1049,10 +1325,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
   add_foreign_key "iam_user_roles", "users", column: "discarded_by_id"
   add_foreign_key "iam_user_roles", "users", column: "undiscarded_by_id"
   add_foreign_key "iam_user_roles", "users", column: "updated_by_id"
-  add_foreign_key "log_clients", "users"
-  add_foreign_key "log_clients", "users", column: "created_by_id"
-  add_foreign_key "log_clients", "users", column: "resolved_by_id"
-  add_foreign_key "log_clients", "users", column: "updated_by_id"
+  add_foreign_key "notifications", "users", column: "created_by_id"
+  add_foreign_key "notifications", "users", column: "discarded_by_id"
+  add_foreign_key "notifications", "users", column: "undiscarded_by_id"
+  add_foreign_key "notifications", "users", column: "updated_by_id"
   add_foreign_key "payment_products", "users", column: "created_by_id"
   add_foreign_key "payment_products", "users", column: "discarded_by_id"
   add_foreign_key "payment_products", "users", column: "undiscarded_by_id"
@@ -1084,6 +1360,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
   add_foreign_key "rails_pulse_operations", "rails_pulse_queries", column: "query_id"
   add_foreign_key "rails_pulse_operations", "rails_pulse_requests", column: "request_id"
   add_foreign_key "rails_pulse_requests", "rails_pulse_routes", column: "route_id"
+  add_foreign_key "recordings", "atoms"
+  add_foreign_key "recordings", "users"
+  add_foreign_key "recordings", "users", column: "created_by_id"
+  add_foreign_key "recordings", "users", column: "discarded_by_id"
+  add_foreign_key "recordings", "users", column: "undiscarded_by_id"
+  add_foreign_key "recordings", "users", column: "updated_by_id"
   add_foreign_key "solid_queue_batch_executions", "solid_queue_batches", column: "batch_id", on_delete: :cascade
   add_foreign_key "solid_queue_batch_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
@@ -1092,6 +1374,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_28_183500) do
   add_foreign_key "solid_queue_ready_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_recurring_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "user_notifications", "notifications", on_delete: :nullify
+  add_foreign_key "user_notifications", "users"
+  add_foreign_key "user_notifications", "users", column: "created_by_id"
+  add_foreign_key "user_notifications", "users", column: "discarded_by_id"
+  add_foreign_key "user_notifications", "users", column: "undiscarded_by_id"
+  add_foreign_key "user_notifications", "users", column: "updated_by_id"
   add_foreign_key "users", "users", column: "created_by_id"
   add_foreign_key "users", "users", column: "discarded_by_id"
   add_foreign_key "users", "users", column: "undiscarded_by_id"

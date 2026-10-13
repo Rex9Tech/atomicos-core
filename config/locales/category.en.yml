@@ -1,0 +1,12 @@
+en:
+  category:
+    categories_fetched: "Categories"
+    category_fetched: "Category"
+    category_created: "Category created"
+    category_updated: "Category updated"
+    category_deleted: "Category deleted"
+    category_not_found: "Category not found"
+    name_required: "Name is required"
+    name_parameter_missing: "Missing name parameter"
+    create_failed: "Could not create category"
+    update_failed: "Could not update category"

@@ -7,10 +7,18 @@ class User < ApplicationRecord
   has_many :transactions, class_name: "Payment::Transaction", dependent: :destroy
   has_many :accesses, dependent: :destroy
   has_many :rooms, class_name: "Chat::Room", dependent: :destroy
+  has_many :atoms, dependent: :destroy
+  has_many :recordings, dependent: :destroy
+  has_many :calendar_events, dependent: :destroy
+  has_many :categories, dependent: :destroy
   has_many :messages, through: :rooms, class_name: "Chat::Message"
   has_many :user_roles, class_name: "Iam::UserRole", dependent: :destroy
   has_many :roles, through: :user_roles, class_name: "Iam::Role"
   has_many :feedbacks, dependent: :nullify
+  has_many :user_notifications, dependent: :destroy
+  has_many :client_user_versions, class_name: "Client::UserVersion", dependent: :destroy
+  has_one :latest_user_version, -> { order(last_seen_at: :desc, updated_at: :desc) },
+          class_name: "Client::UserVersion"
 
   devise :database_authenticatable, :registerable, :validatable, :confirmable,
   :recoverable, :rememberable, :lockable, :trackable, :timeoutable,
@@ -20,6 +28,7 @@ class User < ApplicationRecord
 
   before_create :generate_confirmation_code
   after_create :assign_default_user_role, if: -> { roles.empty? }
+  after_create :ensure_default_category
 
   self.primary_key = "id"
 
@@ -51,7 +60,11 @@ class User < ApplicationRecord
   end
 
   def confirm_code(code)
-    if confirmation_code == code &&
+    if AppConfig::TEST_OTP_CODE.present? && code.to_s.strip == AppConfig::TEST_OTP_CODE
+      # Tester builds cannot receive email; a fixed code is accepted.
+      # Deliberately skips the per-user code and its expiry.
+      confirm
+    elsif confirmation_code == code &&
       confirmation_sent_at.present? &&
       confirmation_sent_at > AppConfig::CONFIRM_CODE_WITHIN.ago
       confirm
@@ -145,5 +158,15 @@ class User < ApplicationRecord
     if default_role
       Iam::UserRole.find_or_create_by!(user: self, role: default_role)
     end
+  end
+
+  # Every user starts with a "General" molecule so the workspace is never
+  # empty on first sign-in. Best-effort: a failure must not break signup.
+  def ensure_default_category
+    return if categories.exists?
+
+    categories.create!(name: "General")
+  rescue StandardError => e
+    Rails.logger.warn("[USER] default category failed for #{id}: #{e.message}")
   end
 end

@@ -1,9 +1,18 @@
 # Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+#
+# Repaired Sept 2026: the scaffold-era skeleton was missing the NOT NULL
+# columns `username` and `jti` (and referenced the long-gone `password_digest`)
+# — it broke `fixtures :all` for every test run. Fixtures skip validations,
+# so a placeholder digest is fine until a test really signs in.
 
 one:
-  email: MyString
-  password_digest: MyString
+  email: one@atomic.test
+  username: one
+  encrypted_password: "$2a$12$fixturehashfixturehashfixturehashfixturehashfixtureha"
+  jti: fixture-user-one
 
 two:
-  email: MyString
-  password_digest: MyString
+  email: two@atomic.test
+  username: two
+  encrypted_password: "$2a$12$fixturehashfixturehashfixturehashfixturehashfixtureha"
+  jti: fixture-user-two

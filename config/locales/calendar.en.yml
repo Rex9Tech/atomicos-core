@@ -1,0 +1,12 @@
+en:
+  calendar:
+    title_required: "Title is required"
+    title_parameter_missing: "Missing title parameter"
+    events_fetched: "Calendar events"
+    event_fetched: "Calendar event"
+    event_created: "Event created"
+    event_updated: "Event updated"
+    event_deleted: "Event deleted"
+    event_not_found: "Event not found"
+    create_failed: "Could not create event"
+    update_failed: "Could not update event"

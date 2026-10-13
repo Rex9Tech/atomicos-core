@@ -40,19 +40,47 @@ class V1::AssetsController < V1::ApplicationController
       return
     end
 
+    # Storage classifies audio as "video", so the limit is decided from the
+    # asset format: recordings run long and need far more headroom, and
+    # photos (avatars) get their own cap above the tiny non-video default.
+    format = determine_asset_format(file)
+    max_size_mb = if format == AssetConstants::AssetFormat::AUDIO
+                    MediaConstants::MAX_AUDIO_SIZE_MB
+    elsif determine_resource_type(file) == "video"
+                    MediaConstants::MAX_VIDEO_SIZE_MB
+    elsif format == AssetConstants::AssetFormat::IMAGE
+                    MediaConstants::MAX_IMAGE_SIZE_MB
+    else
+                    MediaConstants::MAX_NON_VIDEO_SIZE_MB
+    end
+
+    if file.size > max_size_mb.megabytes
+      render_json_response(
+        status_code: 422,
+        message: asset_message(MessageService::Asset::SAVE_FAILED),
+        error: asset_message(
+          MessageService::Asset::FILE_SIZE_EXCEEDED,
+          limit: max_size_mb
+        )
+      )
+      return
+    end
+
     asset_type = params[:type].presence || AssetConstants::AssetType::GENERAL
     assetable_type = params[:assetable_type].presence
     assetable_id = params[:assetable_id].presence
-    duration_secs = params[:duration_secs]
+    # The file itself is the source of truth for how long it plays: older app
+    # builds reported the wall-clock timer, which runs longer than the
+    # captured audio whenever background chunks get dropped.
+    duration_secs = probed_duration_secs(file) || params[:duration_secs]
 
     # Generate storage_key
-    storage_key = "#{File.basename(file.original_filename, '.*')}_of_user_#{current_user.id}_#{Time.now.to_i}"
+    storage_key = AssetConstants::AssetName.for_user(user_id: current_user.id, type: asset_type, original_filename: file.original_filename)
 
     # Upload to storage service
     result = StorageService::Client.upload(
       file,
       storage_key: storage_key,
-      folder: params[:folder].presence || "user_uploads/#{asset_type}",
       resource_type: determine_resource_type(file),
       metadata: {
         user_id: current_user.id.to_s,
@@ -62,11 +90,23 @@ class V1::AssetsController < V1::ApplicationController
 
     # Find or create asset
     asset = Asset.find_or_initialize_by(storage_key: result[:storage_key])
+    # Display name = the ORIGINAL filename (the key already lives in
+    # `storage_key` + `url`). Older uploads stored the key here, which leaked
+    # into atom titles ("user/<uuid>/…" instead of a readable name).
+    original_name = file.respond_to?(:original_filename) ? file.original_filename.to_s : file.to_s
+    display_name = File.basename(original_name.tr("\\", "/")).presence || result[:storage_key]
     asset.assign_attributes(
-      name: result[:storage_key],
+      name: display_name,
       url: result[:url],
       type: asset_type,
       format: determine_asset_format(file),
+      # Document files are parsed while the upload's tempfile is still on disk
+      # — the text becomes AI context when the asset is attached to an atom.
+      extracted_text: DocumentExtractionService.extract(
+        file: file,
+        extension: File.extname(file.original_filename).delete(".").downcase,
+        content_type: file.respond_to?(:content_type) ? file.content_type : nil
+      ),
       size_bytes: result[:bytes],
       duration_secs: duration_secs,
       source: AssetConstants::AssetSource::UPLOAD,
@@ -74,9 +114,11 @@ class V1::AssetsController < V1::ApplicationController
       assetable_id: assetable_id,
       storage_key: result[:storage_key],
       extension: result[:format] || File.extname(file.original_filename).delete("."),
+      status: compression_status_for(file)
     )
 
     if asset.save
+      enqueue_compression_if_needed(asset)
       if asset.type == AssetConstants::AssetType::AVATAR && asset.assetable_type.to_s.downcase == "user" && asset.assetable_id.present?
         old_avatars = Asset.where(type: AssetConstants::AssetType::AVATAR, assetable_type: asset.assetable_type, assetable_id: asset.assetable_id)
                            .where.not(id: asset.id)
@@ -95,7 +137,7 @@ class V1::AssetsController < V1::ApplicationController
         }
       )
     else
-      StorageService::Client.delete_later(
+      StorageService::Client.delete(
         result[:storage_key],
         resource_type: result[:resource_type]
       )
@@ -237,5 +279,41 @@ class V1::AssetsController < V1::ApplicationController
   def determine_asset_format(file)
     ext = File.extname(file.original_filename).delete(".").downcase
     AssetConstants::AssetFormat.from_extension(ext)
+  end
+
+  # Real playable length of an uploaded audio file — nil for non-audio or
+  # unreadable files, so the caller keeps its own value then.
+  def probed_duration_secs(file)
+    return nil unless determine_asset_format(file) == AssetConstants::AssetFormat::AUDIO
+
+    MediaService::AudioProbe.duration_secs(file)
+  end
+
+  def compression_status_for(file)
+    if MediaConstants::MEDIA_CONTAINER_ENABLED && file_compressible?(file)
+      MediaConstants::Status::PENDING
+    else
+      MediaConstants::Status::READY
+    end
+  end
+
+  def enqueue_compression_if_needed(asset)
+    return unless asset.status == MediaConstants::Status::PENDING
+
+    if asset.compressible_video?
+      Media::CompressVideoJob.perform_later(asset_id: asset.id)
+      Media::GenerateVideoThumbnailJob.perform_later(asset_id: asset.id)
+      Rails.logger.info("[AssetsController] Enqueued video compression for asset #{asset.id}")
+    elsif asset.compressible_image?
+      Media::CompressImageJob.perform_later(asset_id: asset.id)
+      Rails.logger.info("[AssetsController] Enqueued image compression for asset #{asset.id}")
+    end
+  end
+
+  def file_compressible?(file)
+    filename = file.respond_to?(:original_filename) ? file.original_filename : file.to_s
+    ext = File.extname(filename).delete(".").downcase
+    MediaConstants::COMPRESSIBLE_VIDEO_EXTENSIONS.include?(ext) ||
+      MediaConstants::COMPRESSIBLE_IMAGE_EXTENSIONS.include?(ext)
   end
 end

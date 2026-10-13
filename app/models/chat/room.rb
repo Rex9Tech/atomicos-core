@@ -5,7 +5,16 @@ module Chat
     self.table_name = "chat_rooms"
 
     belongs_to :user
+    belongs_to :category, optional: true
     has_many :messages, class_name: "Chat::Message", dependent: :destroy
+
+    # The molecule's home room: reused across asks so the conversation history
+    # stays per molecule. Only creates when the user has none yet.
+    def self.for_category(user:, category:, title: nil)
+      user.rooms.find_or_create_by!(category: category) do |room|
+        room.title = title.presence || category.name
+      end
+    end
 
     validates :title, presence: true
 

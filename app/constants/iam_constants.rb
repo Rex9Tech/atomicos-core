@@ -1,5 +1,6 @@
-# app/constants/iam_constants.rb
+# frozen_string_literal: true
 
+# app/constants/iam_constants.rb
 module IamConstants
   module Role
     SUPER_ADMIN = "super_admin".freeze
@@ -11,7 +12,9 @@ module IamConstants
       "users",
       "roles",
       "permissions",
-      "user_roles"
+      "user_roles",
+      "versions",
+      "user_versions"
     ].freeze
   end
 
@@ -37,20 +40,26 @@ module IamConstants
     NOTIFICATIONS = "notifications".freeze
     AI            = "ai".freeze
     SPEECH        = "speech".freeze
-    CLIENTS       = "clients".freeze
+    LOGS          = "logs".freeze
     FEEDBACKS     = "feedbacks".freeze
     ANALYTICS     = "analytics".freeze
+    VERSIONS      = "versions".freeze
+    USER_VERSIONS = "user_versions".freeze
+    ATOMS         = "atoms".freeze
+    RECORDINGS    = "recordings".freeze
+    EVENTS        = "events".freeze
+    CATEGORIES    = "categories".freeze
     ALL           = [
       USERS, ROLES, USER_ROLES, PERMISSIONS, PRODUCTS, PAYMENTS,
       SUBSCRIPTIONS, TRANSACTIONS, ACCESSES, ASSETS, NOTIFICATIONS,
-      AI, SPEECH, CLIENTS, FEEDBACKS, ANALYTICS
-
+      AI, SPEECH, LOGS, FEEDBACKS, ANALYTICS, VERSIONS, USER_VERSIONS,
+      ATOMS, RECORDINGS, EVENTS, CATEGORIES
     ].freeze
   end
 
   module DefaultPermissions
     USER = [
-      { resource: Resource::CLIENTS, actions: [ Action::CREATE ] },
+      { resource: Resource::LOGS, actions: [ Action::CREATE ] },
       { resource: Resource::PRODUCTS, actions: [ Action::READ ] },
       { resource: Resource::PAYMENTS, actions: [ Action::CREATE ] },
       { resource: Resource::SUBSCRIPTIONS, actions: [ Action::READ, Action::CREATE ] },
@@ -60,7 +69,14 @@ module IamConstants
       { resource: Resource::USERS, actions: Action::ALL },
       { resource: Resource::AI, actions: Action::ALL },
       { resource: Resource::SPEECH, actions: Action::ALL },
-      { resource: Resource::FEEDBACKS, actions: [ Action::CREATE, Action::READ ] }
+      { resource: Resource::FEEDBACKS, actions: [ Action::CREATE, Action::READ ] },
+      { resource: Resource::NOTIFICATIONS, actions: [ Action::READ, Action::UPDATE, Action::DELETE ] },
+      { resource: Resource::VERSIONS, actions: [ Action::READ ] },
+      { resource: Resource::USER_VERSIONS, actions: [ Action::CREATE ] },
+      { resource: Resource::ATOMS, actions: Action::ALL },
+      { resource: Resource::RECORDINGS, actions: Action::ALL },
+      { resource: Resource::EVENTS, actions: Action::ALL },
+      { resource: Resource::CATEGORIES, actions: Action::ALL }
     ].freeze
   end
 end

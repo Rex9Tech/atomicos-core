@@ -6,6 +6,10 @@ require "uri"
 
 module SpeechService
   class Session
+      # Azure answers the end-of-audio frame with the turn's final phrase
+      # (proper casing and punctuation), so the socket is held open briefly.
+      FINAL_FLUSH_SECONDS = 1.5
+
       def initialize(language:, on_event:, socket: nil)
         @language = language
         @on_event = on_event
@@ -63,6 +67,7 @@ module SpeechService
 
         end_audio_stream
         @stopped = true
+        await_final_phrase
         @socket&.close
       rescue => e
         Rails.logger.error("#{SpeechService::AzureSpeech::LOG_PREFIX} Close Error: #{e.message}")
@@ -106,7 +111,7 @@ module SpeechService
         on_message = method(:handle_raw_message)
         on_socket_error = lambda do |error|
           Rails.logger.error("#{SpeechService::AzureSpeech::LOG_PREFIX} Socket Error: #{error}")
-          emit_error(provider_error_message)
+          emit_error(provider_error_message) unless @stopped
         end
 
         socket = WebSocket::Client::Simple.connect(
@@ -156,6 +161,14 @@ module SpeechService
       # A zero-length audio message tells Azure the turn is finished.
       def end_audio_stream
         deliver(audio_frame(""), type: :binary) if @open && @riff_sent
+      end
+
+      # Waits for the phrase event Azure emits once the turn is closed; the
+      # client may already be gone, in which case this is a harmless pause.
+      def await_final_phrase
+        return unless @open && @riff_sent
+
+        sleep FINAL_FLUSH_SECONDS
       end
 
       def deliver(data, type:)

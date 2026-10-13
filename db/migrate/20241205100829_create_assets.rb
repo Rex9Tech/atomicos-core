@@ -11,7 +11,13 @@ class CreateAssets < ActiveRecord::Migration[8.1]
       t.string :source, null: false, default: "upload"                  # "google", "upload", etc.
       t.string :extension                                               # File extension (e.g., "jpg", "mp3", "png")
       t.string :assetable_type                                          # Model name (e.g. "user", "course", "lesson", "teacher", "monastery", "message")
-      t.uuid :assetable_id                                               # ID of the associated resource
+      t.uuid :assetable_id                                              # ID of the associated resource
+      t.string :status, null: false, default: "pending"                   # Processing Status ("ready", "pending", "processing", "failed")
+
+      t.references :parent_asset,
+                  type: :uuid,
+                  index: { unique: true },
+                  foreign_key: { to_table: :assets }
 
       # ===== AUDIT =====
       t.references :created_by,
@@ -42,5 +48,6 @@ class CreateAssets < ActiveRecord::Migration[8.1]
     add_index :assets, :type
     add_index :assets, [ :assetable_type, :assetable_id ]
     add_index :assets, :discarded_at
+    add_index :assets, :status
   end
 end

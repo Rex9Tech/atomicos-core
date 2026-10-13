@@ -1,7 +1,7 @@
 # app/serializers/chat/room_serializer.rb
 
 class Chat::RoomSerializer < ApplicationSerializer
-  attributes :id, :title, :metadata, :created_at, :updated_at
+  attributes :id, :title, :metadata, :created_at, :updated_at, :category_id
 
   attribute :user_id do |room|
     room.user_id

@@ -1,0 +1,12 @@
+my:
+  calendar:
+    title_required: "ခေါင်းစဉ် လိုအပ်ပါသည်"
+    title_parameter_missing: "ခေါင်းစဉ် မပါရှိပါ"
+    events_fetched: "ပြက္ခဒိန် ဖြစ်ရပ်များ"
+    event_fetched: "ပြက္ခဒိန် ဖြစ်ရပ်"
+    event_created: "ဖြစ်ရပ် ဖန်တီးပြီးပါပြီ"
+    event_updated: "ဖြစ်ရပ် မွမ်းမံပြီးပါပြီ"
+    event_deleted: "ဖြစ်ရပ် ဖျက်ပြီးပါပြီ"
+    event_not_found: "ဖြစ်ရပ် မတွေ့ပါ"
+    create_failed: "ဖြစ်ရပ် ဖန်တီး၍မရပါ"
+    update_failed: "ဖြစ်ရပ် မွမ်းမံ၍မရပါ"

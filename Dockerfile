@@ -18,9 +18,12 @@ WORKDIR /rails
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y \
       curl \
+      ffmpeg \
       libjemalloc2 \
       libvips \
-      postgresql-client && \
+      poppler-utils \
+      postgresql-client \
+      unzip && \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/archives
 
 # Set production environment
@@ -41,6 +44,9 @@ RUN apt-get update -qq && \
       build-essential \
       git \
       libpq-dev \
+      libyaml-dev \
+      libssl-dev \
+      libffi-dev \
       pkg-config && \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/archives
 

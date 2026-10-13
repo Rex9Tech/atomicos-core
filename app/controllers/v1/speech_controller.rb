@@ -13,11 +13,12 @@ class V1::SpeechController < V1::ApplicationController
   def create_stt
     audio = params[:audio]
     audio_url = params[:audio_url]
+    language = params[:language].presence
 
     if audio.present?
-      result = SpeechService::Client.speech_to_text_from_file(audio: audio)
+      result = SpeechService::Client.speech_to_text_from_file(audio: audio, language: language)
     elsif audio_url.present?
-      result = SpeechService::Client.speech_to_text_from_url(audio_url: audio_url)
+      result = SpeechService::Client.speech_to_text_from_url(audio_url: audio_url, language: language)
     else
       render_json_response(
         status_code: 422,

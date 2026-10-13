@@ -1,0 +1,58 @@
+# Render Blueprint — atomicos-core (Rails 8.1 API)
+# Free-tier friendly: single web service (Puma) runs Solid Queue IN-PROCESS (SOLID_QUEUE_IN_PUMA=1),
+# because Render's free plan does NOT allow background workers.
+# Demo/test config.
+
+services:
+  - type: web
+    name: atomicos-core
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /up
+    envVars:
+      - key: RAILS_ENV
+        value: production
+      - key: RAILS_DATABASE_URL
+        fromDatabase:
+          name: atomicos-db
+          property: connectionString
+      - key: RAILS_SECRET_KEY_BASE
+        generateValue: true
+      - key: RAILS_MASTER_KEY
+        value: master-key
+      - key: RAILS_JWT_SECRET_KEY
+        value: rexone-dev-demo
+      - key: STORAGE_PROVIDER
+        value: local
+      - key: MEDIA_CONTAINER_ENABLED
+        value: "false"
+      - key: SOLID_QUEUE_IN_PUMA
+        value: "1"
+      - key: RAILS_SERVER_BASE_URL
+        value: https://atomicos-core.onrender.com
+      - key: RAILS_CLIENT_BASE_URL
+        value: https://atomicos-web.onrender.com
+      - key: RAILS_LOG_LEVEL
+        value: info
+      # Providers — leave blank for demo (app boots without them)
+      - key: STRIPE_SECRET_KEY
+        value: ""
+      - key: STRIPE_PUBLISHABLE_KEY
+        value: ""
+      - key: STRIPE_WEBHOOK_SECRET
+        value: ""
+      - key: DEEPSEEK_API_KEY
+        value: ""
+      - key: ONE_SIGNAL_APP_ID
+        value: ""
+      - key: ONE_SIGNAL_API_KEY
+        value: ""
+      - key: AZURE_SPEECH_KEY
+        value: ""
+
+databases:
+  - name: atomicos-db
+    plan: free
+    databaseName: atomicos_core
+    ipAllowList: []

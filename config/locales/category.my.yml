@@ -1,0 +1,12 @@
+my:
+  category:
+    categories_fetched: "အမျိုးအစားများ"
+    category_fetched: "အမျိုးအစား"
+    category_created: "အမျိုးအစား ဖန်တီးပြီးပါပြီ"
+    category_updated: "အမျိုးအစား မွမ်းမံပြီးပါပြီ"
+    category_deleted: "အမျိုးအစား ဖျက်ပြီးပါပြီ"
+    category_not_found: "အမျိုးအစား မတွေ့ပါ"
+    name_required: "အမည် ထည့်ရန် လိုအပ်ပါသည်"
+    name_parameter_missing: "အမည် parameter မပါရှိပါ"
+    create_failed: "အမျိုးအစား ဖန်တီး၍ မရပါ"
+    update_failed: "အမျိုးအစား မွမ်းမံ၍ မရပါ"

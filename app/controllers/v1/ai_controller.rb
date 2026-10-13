@@ -29,13 +29,17 @@ class V1::AiController < V1::ApplicationController
         return
       end
 
-      user_message = @room.messages.create!(
-        role: AiConstants::ChatRole::USER,
+      user_message = Chat::Message.create_question!(
+        room: @room,
         content: message,
-        ai_status: Chat::Message::STATUSES[:queued],
-        ai_system_prompt: params[:system_prompt].presence,
-        ai_temperature: params[:temperature]&.to_f || 0.7,
-        ai_max_tokens: params[:max_tokens]&.to_i || 2000
+        system_prompt: params[:system_prompt],
+        context: params[:context],
+        temperature: params[:temperature],
+        max_tokens: params[:max_tokens],
+        # Context pointers when the question was asked about an atom — they
+        # ride along so the completion notification can name it.
+        atom_id: params[:atom_id],
+        atom_title: params[:atom_title]
       )
 
       job = Ai::ProcessChatJob.perform_later(user_message.id)
@@ -124,10 +128,25 @@ class V1::AiController < V1::ApplicationController
   end
 
   # POST /ai/rooms
+  #
+  # With a category_id the call is get-or-create: a molecule keeps ONE home
+  # room, so asking about it again reopens the same history. Without one it
+  # always creates a fresh room.
   def create_room
-    room = current_user.rooms.create!(
-      title: params[:title] || ai_message(MessageService::Ai::DEFAULT_ROOM_TITLE)
-    )
+    category = current_user.categories.find_by(id: params[:category_id]) if params[:category_id].present?
+
+    room =
+      if category
+        Chat::Room.for_category(
+          user: current_user,
+          category: category,
+          title: params[:title].presence
+        )
+      else
+        current_user.rooms.create!(
+          title: params[:title] || ai_message(MessageService::Ai::DEFAULT_ROOM_TITLE)
+        )
+      end
 
     render_json_response(
       status_code: 201,
@@ -172,7 +191,7 @@ class V1::AiController < V1::ApplicationController
     result = AiService::Client.chat(
       messages: messages,
       temperature: 0.5,
-      max_tokens: 500
+      max_tokens: 3_000
     )
 
     if result[:error]
@@ -182,7 +201,7 @@ class V1::AiController < V1::ApplicationController
         error: result[:error]
       )
     else
-      response_text = result.dig("choices", 0, "message", "content") ||
+      response_text = AiService::Client.text_from(result).presence ||
                       ai_message(MessageService::Ai::NO_RESPONSE)
 
       render_json_response(
@@ -214,7 +233,7 @@ class V1::AiController < V1::ApplicationController
     result = AiService::Client.chat(
       messages: messages,
       temperature: 0.3,
-      max_tokens: 1000
+      max_tokens: 3_000
     )
 
     if result[:error]
@@ -224,7 +243,7 @@ class V1::AiController < V1::ApplicationController
         error: result[:error]
       )
     else
-      response_text = result.dig("choices", 0, "message", "content") ||
+      response_text = AiService::Client.text_from(result).presence ||
                       ai_message(MessageService::Ai::NO_RESPONSE)
 
       render_json_response(
@@ -268,7 +287,7 @@ class V1::AiController < V1::ApplicationController
     result = AiService::Client.chat(
       messages: messages,
       temperature: 0.3,
-      max_tokens: 500
+      max_tokens: 3_000
     )
 
     if result[:error]
@@ -278,7 +297,7 @@ class V1::AiController < V1::ApplicationController
         error: result[:error]
       )
     else
-      response_text = result.dig("choices", 0, "message", "content") ||
+      response_text = AiService::Client.text_from(result).presence ||
                       ai_message(MessageService::Ai::NO_RESPONSE)
 
       render_json_response(
@@ -289,10 +308,127 @@ class V1::AiController < V1::ApplicationController
     end
   end
 
+  # POST /ai/decisions
+  def create_decisions
+    text = resolve_ai_text
+    return render_ai_text_required if text.blank?
+
+    result = run_structured_prompt(AiConstants::AiPrompt::DECISIONS, text)
+    if result[:error]
+      render_json_response(
+        status_code: 500,
+        message: ai_message(MessageService::Ai::SERVICE_ERROR),
+        error: result[:error]
+      )
+    else
+      render_json_response(
+        status_code: 200,
+        message: ai_message(MessageService::Ai::DECISIONS_GENERATED),
+        data: { decisions: result[:data]["decisions"] || [] }
+      )
+    end
+  end
+
+  # POST /ai/tasks
+  def create_tasks
+    text = resolve_ai_text
+    return render_ai_text_required if text.blank?
+
+    result = run_structured_prompt(AiConstants::AiPrompt::TASKS, text)
+    if result[:error]
+      render_json_response(
+        status_code: 500,
+        message: ai_message(MessageService::Ai::SERVICE_ERROR),
+        error: result[:error]
+      )
+    else
+      render_json_response(
+        status_code: 200,
+        message: ai_message(MessageService::Ai::TASKS_GENERATED),
+        data: { tasks: result[:data]["tasks"] || [] }
+      )
+    end
+  end
+
+  # POST /ai/report
+  def create_report
+    text = resolve_ai_text
+    return render_ai_text_required if text.blank?
+
+    result = run_structured_prompt(AiConstants::AiPrompt::REPORT, text)
+    if result[:error]
+      render_json_response(
+        status_code: 500,
+        message: ai_message(MessageService::Ai::SERVICE_ERROR),
+        error: result[:error]
+      )
+    else
+      render_json_response(
+        status_code: 200,
+        message: ai_message(MessageService::Ai::REPORT_GENERATED),
+        data: { report: result[:data] }
+      )
+    end
+  end
+
   private
 
   def ai_message(key, **options)
     MessageService::Ai.t(key, **options)
+  end
+
+  # Resolve the input text for the structured endpoints: an explicit `text`,
+  # else the note + summary/transcript of an atom referenced by `atom_id`.
+  def resolve_ai_text
+    text = params[:text]
+    return text if text.present?
+
+    atom_id = params[:atom_id]
+    return nil if atom_id.blank?
+
+    atom = current_user.atoms.find_by(id: atom_id)
+    return nil if atom.blank?
+
+    parts = [ atom.note ]
+    Array(atom.summary_blocks).each do |b|
+      parts << (b.is_a?(Hash) ? (b["text"] || b["content"] || b["title"]) : b)
+    end
+    Array(atom.transcript_segments).each do |s|
+      parts << (s.is_a?(Hash) ? (s["text"] || s["content"]) : s)
+    end
+    # Attached documents (PDF/DOCX/text) carry their extracted text so the
+    # structured AI endpoints can answer from uploaded files too.
+    Array(atom.assets).each do |asset|
+      text = asset.try(:extracted_text)
+      parts << text if text.present?
+    end
+    parts.compact.map(&:to_s).reject(&:blank?).join("\n\n").presence
+  end
+
+  def run_structured_prompt(prompt, text)
+    messages = [
+      { role: AiConstants::ChatRole::SYSTEM, content: prompt },
+      { role: AiConstants::ChatRole::USER, content: text }
+    ]
+    result = AiService::Client.chat(messages: messages, temperature: 0.3, max_tokens: 3_000)
+    return { error: result[:error] } if result[:error]
+
+    response_text = AiService::Client.text_from(result)
+    { data: parse_ai_json(response_text) }
+  end
+
+  def parse_ai_json(text)
+    JSON.parse(text.to_s.strip)
+  rescue JSON::ParserError
+    {}
+  end
+
+  def render_ai_text_required
+    render_json_response(
+      status_code: 422,
+      message: ai_message(MessageService::Ai::TEXT_REQUIRED),
+      error: ai_message(MessageService::Ai::TEXT_PARAMETER_MISSING)
+    )
   end
 
   def set_room

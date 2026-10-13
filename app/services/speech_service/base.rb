@@ -6,11 +6,11 @@ module SpeechService
       raise NotImplementedError, "#{self.class.name} does not support #text_to_speech"
     end
 
-    def speech_to_text_from_file(audio:)
+    def speech_to_text_from_file(audio:, language: nil)
       raise NotImplementedError, "#{self.class.name} does not support #speech_to_text_from_file"
     end
 
-    def speech_to_text_from_url(audio_url:)
+    def speech_to_text_from_url(audio_url:, language: nil)
       raise NotImplementedError, "#{self.class.name} does not support #speech_to_text_from_url"
     end
 

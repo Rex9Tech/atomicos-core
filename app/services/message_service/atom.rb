@@ -1,0 +1,27 @@
+module MessageService
+  class Atom < Base
+    TITLE_REQUIRED = "atom.title_required"
+    TITLE_PARAMETER_MISSING = "atom.title_parameter_missing"
+    NOTE_REQUIRED = "atom.note_required"
+    NOTE_PARAMETER_MISSING = "atom.note_parameter_missing"
+    URL_REQUIRED = "atom.url_required"
+    URL_PARAMETER_MISSING = "atom.url_parameter_missing"
+    ATOMS_FETCHED = "atom.atoms_fetched"
+    ATOM_FETCHED = "atom.atom_fetched"
+    ATOM_CREATED = "atom.atom_created"
+    ATOM_UPDATED = "atom.atom_updated"
+    ATOM_DELETED = "atom.atom_deleted"
+    ATOM_NOT_FOUND = "atom.atom_not_found"
+    CREATE_FAILED = "atom.create_failed"
+    UPDATE_FAILED = "atom.update_failed"
+    ASSET_REQUIRED = "atom.asset_required"
+    ASSET_NOT_FOUND = "atom.asset_not_found"
+    ASSET_ATTACHED = "atom.asset_attached"
+    ASSET_DETACHED = "atom.asset_detached"
+    ASSETS_FETCHED = "atom.assets_fetched"
+    DEFAULT_URL_TITLE = "atom.default_url_title"
+    SHARE_REQUIRED = "atom.share_required"
+    SHARE_PARAMETER_MISSING = "atom.share_parameter_missing"
+    DEFAULT_SHARE_TITLE = "atom.default_share_title"
+  end
+end

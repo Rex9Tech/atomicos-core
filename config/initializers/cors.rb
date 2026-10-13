@@ -26,7 +26,9 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
             "https://rexone.me", # For prod
             "http://rexone.me",
             "https://www.rexone.me",
-            "http://www.rexone.me"
+            "http://www.rexone.me",
+            "https://atomicos.khantsithu.tech", # Current web app
+            "https://atomicos-web.khantsithu.tech"
 
     resource "*",
       headers: :any,
