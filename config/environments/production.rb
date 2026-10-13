@@ -55,6 +55,12 @@ Rails.application.configure do
 
   config.action_cable.allowed_request_origins = cable_origins.compact
 
+  # Native mobile clients (Flutter) send no Origin header; the JWT token in
+  # ?token= authenticates them (see ApplicationCable::Connection), so CSRF
+  # origin checks must be disabled or every mobile socket connection gets a
+  # 404 ("Page not found") and live features (transcription, broadcasts) die.
+  config.action_cable.disable_request_forgery_protection = true
+
   # Assume all access to the app is happening through a SSL-terminating reverse proxy (Traefik/Coolify).
   # Can be used together with config.force_ssl for Strict-Transport-Security and secure cookies.
   config.assume_ssl = true
