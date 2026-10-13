@@ -36,17 +36,18 @@ RSpec.describe "V1 Admin Users API", type: :request do
         name_match.id,
         email_match.id
       )
-    end 
-     
-    it "rejects standard admin users" do
+    end
+
+    it "allows standard admins with user read permission" do
       standard_admin = create(:user)
       admin_token = jwt_for(standard_admin)
       allow(CacheService).to receive(:read).and_return(admin_token)
       grant_admin_role(standard_admin)
+      grant_admin_permissions(standard_admin, "users", :read)
 
       get "/v1/admin/users", headers: authorization_headers(admin_token)
 
-      expect(response).to have_http_status(:forbidden)
+      expect(response).to have_http_status(:ok)
     end
 
     it "rejects non-admin users" do
@@ -72,6 +73,24 @@ RSpec.describe "V1 Admin Users API", type: :request do
       get "/v1/admin/users", headers: authorization_headers(token)
 
       expect(response).to have_http_status(:forbidden)
+    end
+  end
+
+  describe "GET /v1/admin/users/:id" do
+    it "allows standard admins with user read permission and serializes confirmed status" do
+      standard_admin = create(:user)
+      target_user = create(:user, confirmed_at: Time.current)
+      admin_token = jwt_for(standard_admin)
+      allow(CacheService).to receive(:read).and_return(admin_token)
+      grant_admin_role(standard_admin)
+      grant_admin_permissions(standard_admin, "users", :read)
+
+      get "/v1/admin/users/#{target_user.id}", headers: authorization_headers(admin_token)
+
+      expect(response).to have_http_status(:ok)
+      expect(response_data["id"]).to eq(target_user.id)
+      expect(response_data.dig("attributes", "confirmed")).to be true
+      expect(response_data.dig("attributes", "confirmed_at")).to be_present
     end
   end
 end

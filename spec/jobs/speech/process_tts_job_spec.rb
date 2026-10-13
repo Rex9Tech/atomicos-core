@@ -3,13 +3,23 @@ require "rails_helper"
 RSpec.describe Speech::ProcessTtsJob, type: :job do
   let(:room) { create(:chat_room) }
   let(:message) { create(:chat_message, room: room, role: "assistant", content: "Hello there") }
-  let(:storage_key) { "speech/tts/#{AssetConstants::AssetName.tts_for_message(message.id)}" }
+  let(:frozen_time) { Time.zone.local(2026, 9, 15, 12, 0, 0) }
+  let(:logical_key) do
+    "user/#{room.user_id}/tts/tts_message_#{message.id}_#{frozen_time.to_i}.mp3"
+  end
+  let(:storage_key) { "dev/#{logical_key}" }
 
   before do
     allow(NotificationService::Center).to receive(:notify)
+    allow(Media::CompressMediaJob).to receive(:perform_later)
   end
 
-  it "synthesizes, uploads, persists an audio Asset, and notifies readiness" do
+  around do |example|
+    travel_to(frozen_time) { example.run }
+  end
+
+  it "synthesizes, uploads, persists a TTS Asset, queues audio processing, and notifies readiness" do
+    stub_const("MediaConstants::MEDIA_CONTAINER_ENABLED", true)
     allow(SpeechService::Client).to receive(:text_to_speech).and_return(
       bytes: "ID3fake",
       content_type: "audio/mpeg",
@@ -28,9 +38,9 @@ RSpec.describe Speech::ProcessTtsJob, type: :job do
     message.reload
     asset = message.tts_asset
     expect(asset).to have_attributes(
-      name: AssetConstants::AssetName.tts_for_message(message.id),
+      name: storage_key,
       url: "https://cdn.example.com/speech.mp3",
-      type: "audio",
+      type: "tts",
       format: "audio",
       extension: "mp3",
       size_bytes: 12345,
@@ -39,6 +49,7 @@ RSpec.describe Speech::ProcessTtsJob, type: :job do
       assetable_type: "Chat::Message",
       assetable_id: message.id
     )
+    expect(asset.status).to eq("pending")
     expect(message).to have_attributes(
       tts_status: "completed",
       tts_error: nil
@@ -47,12 +58,12 @@ RSpec.describe Speech::ProcessTtsJob, type: :job do
     expect(StorageService::Client).to have_received(:upload).with(
       anything,
       hash_including(
-        storage_key: AssetConstants::AssetName.tts_for_message(message.id),
-        folder: "speech/tts",
-        resource_type: "video",
+        storage_key: logical_key,
+        resource_type: AssetConstants::AssetFormat.storage_resource_type(MediaConstants::AUDIO_EXT_MP3),
         overwrite: true
       )
     )
+    expect(Media::CompressMediaJob).to have_received(:perform_later).with(asset_id: asset.id)
     expect(NotificationService::Center).to have_received(:notify).with(
       hash_including(
         user_id: room.user_id,
@@ -65,7 +76,7 @@ RSpec.describe Speech::ProcessTtsJob, type: :job do
             hash_including(
               id: asset.id,
               url: "https://cdn.example.com/speech.mp3",
-              type: "audio",
+              type: "tts",
               assetable_type: "Chat::Message",
               assetable_id: message.id
             )
@@ -75,13 +86,13 @@ RSpec.describe Speech::ProcessTtsJob, type: :job do
     )
   end
 
-  it "overwrites the existing audio Asset on re-TTS instead of creating another" do
+  it "overwrites the existing TTS Asset on re-TTS instead of creating another" do
     existing = create(
       :asset,
-      type: "audio",
+      type: "tts",
       format: "audio",
       source: "upload",
-      name: AssetConstants::AssetName.tts_for_message(message.id),
+      name: storage_key,
       url: "https://cdn.example.com/old.mp3",
       storage_key: storage_key,
       assetable_type: "Chat::Message",

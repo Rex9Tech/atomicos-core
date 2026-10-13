@@ -6,18 +6,18 @@ class V1::Admin::Iam::RolesController < V1::ApplicationController
 
   # GET /v1/admin/iam/roles
   def index
-    roles = if params[:discarded].to_s == "true"
+    filters = index_params
+    roles = if filters[:discarded].to_s == "true"
       ::Iam::Role.with_discarded.discarded.includes(:permissions)
     else
       ::Iam::Role.kept.includes(:permissions)
     end
     roles = sort(roles, columns: SortConstants::Columns::ROLE)
-    pagy, records = pagy(roles)
+    pagy, records = pagy(roles, limit: filters[:limit])
     render_json_response(
       status_code: 200,
       message: admin_user_message(MessageService::Admin::User::USER_ROLES_RETRIEVED),
-      data: ::Iam::RoleSerializer.paginated(records, pagy),
-      pagy: pagy
+      **::Iam::RoleSerializer.collection_pagy(records, pagy)
     )
   end
 
@@ -26,13 +26,13 @@ class V1::Admin::Iam::RolesController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: iam_message(MessageService::Iam::ROLE_FETCHED),
-      data: ::Iam::RoleSerializer.new(@role).serializable_hash[:data][:attributes]
+      data: ::Iam::RoleSerializer.record(@role)
     )
   end
 
   # POST /v1/admin/iam/roles
   def create
-    role = ::Iam::Role.new(role_params)
+    role = ::Iam::Role.new(role_params.except(:permission_ids))
 
     if role.save
       assign_permissions(role) if permission_ids_param_provided?
@@ -40,7 +40,7 @@ class V1::Admin::Iam::RolesController < V1::ApplicationController
       render_json_response(
         status_code: 201,
         message: iam_message(MessageService::Iam::ROLE_CREATED),
-        data: ::Iam::RoleSerializer.new(role).serializable_hash[:data][:attributes]
+        data: ::Iam::RoleSerializer.record(role)
       )
     else
       render_json_response(
@@ -53,21 +53,28 @@ class V1::Admin::Iam::RolesController < V1::ApplicationController
 
   # PATCH/PUT /v1/admin/iam/roles/:id
   def update
-    if @role.update(role_params)
-      assign_permissions(@role) if permission_ids_param_provided?
-
-      render_json_response(
-        status_code: 200,
-        message: iam_message(MessageService::Iam::ROLE_UPDATED),
-        data: ::Iam::RoleSerializer.new(@role).serializable_hash[:data][:attributes]
-      )
-    else
-      render_json_response(
+    unless @role.update(role_params.except(:permission_ids))
+      return render_json_response(
         status_code: 422,
         message: iam_message(MessageService::Iam::ROLE_UPDATE_FAILED),
         error: @role.errors.full_messages.to_sentence
       )
     end
+
+    permissions_changed = permission_ids_param_provided? && assign_permissions(@role)
+    notify_assigned_users(@role) if permissions_changed || @role.saved_change_to_name?
+
+    render_json_response(
+      status_code: 200,
+      message: iam_message(MessageService::Iam::ROLE_UPDATED),
+      data: ::Iam::RoleSerializer.record(@role)
+    )
+  rescue ActiveRecord::RecordNotDestroyed => error
+    render_json_response(
+      status_code: 422,
+      message: iam_message(MessageService::Iam::ROLE_UPDATE_FAILED),
+      error: error.record.errors.full_messages.to_sentence
+    )
   end
 
   # POST /v1/admin/iam/roles/:id/discard
@@ -82,6 +89,7 @@ class V1::Admin::Iam::RolesController < V1::ApplicationController
     end
 
     @role.discard!
+    notify_assigned_users(@role)
 
     render_json_response(
       status_code: 200,
@@ -92,11 +100,12 @@ class V1::Admin::Iam::RolesController < V1::ApplicationController
   # POST /v1/admin/iam/roles/:id/undiscard
   def undiscard
     @role.undiscard!
+    notify_assigned_users(@role)
 
     render_json_response(
       status_code: 200,
       message: iam_message(MessageService::Iam::ROLE_UPDATED),
-      data: ::Iam::RoleSerializer.new(@role).serializable_hash[:data][:attributes]
+      data: ::Iam::RoleSerializer.record(@role)
     )
   end
 
@@ -111,7 +120,9 @@ class V1::Admin::Iam::RolesController < V1::ApplicationController
       return
     end
 
+    affected_users = @role.users.to_a
     @role.destroy
+    notify_users(affected_users)
 
     render_json_response(
       status_code: 200,
@@ -121,33 +132,54 @@ class V1::Admin::Iam::RolesController < V1::ApplicationController
 
   private
 
+  def index_params
+    params.permit(:discarded, :limit, :page)
+  end
+
   def set_active_role
-    @role = ::Iam::Role.find(params[:id])
+    @role = ::Iam::Role.find(params.permit(:id)[:id])
   end
 
   def set_role_including_discarded
-    @role = ::Iam::Role.with_discarded.find(params[:id])
+    @role = ::Iam::Role.with_discarded.find(params.permit(:id)[:id])
   end
 
   def role_params
-    params.permit(:name, :description)
+    params.permit(:name, :description, permission_ids: [])
   end
 
   def permission_ids_param
-    params[:permission_ids]
+    role_params[:permission_ids]
   end
 
   def permission_ids_param_provided?
-    params.key?(:permission_ids)
+    role_params.key?(:permission_ids)
   end
 
   def assign_permissions(role)
     permission_ids = Array(permission_ids_param).reject(&:blank?)
     permissions = ::Iam::Permission.where(id: permission_ids)
+    current_permission_ids = role.permission_ids.map(&:to_s).sort
+    next_permission_ids = permissions.pluck(:id).map(&:to_s).sort
 
-    role.role_permissions.destroy_all
+    return false if current_permission_ids == next_permission_ids
+
+    role.role_permissions.where.not(permission_id: next_permission_ids).find_each(&:destroy!)
     permissions.each do |permission|
       role.role_permissions.find_or_create_by!(permission: permission)
+    end
+
+    true
+  end
+
+  def notify_assigned_users(role)
+    notify_users(role.users)
+  end
+
+  def notify_users(users)
+    users.each do |user|
+      user.update_column(:jti, SecureRandom.uuid) unless user.id == current_user&.id
+      NotificationService::Center.iam_updated(user)
     end
   end
 

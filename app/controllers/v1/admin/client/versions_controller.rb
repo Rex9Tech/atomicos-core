@@ -7,30 +7,21 @@ class V1::Admin::Client::VersionsController < V1::ApplicationController
 
   # GET /v1/admin/client/versions
   def index
-    versions = Client::Version.with_install_counts
-    versions = versions.where(status: params[:status]) if params[:status].present?
-    versions = sort(versions, columns: SortConstants::Columns::VERSION)
+    filters = filter_params
+    discarded = filters[:discarded].to_s == "true"
+    versions = discarded ? Client::Version.with_discarded.discarded.with_install_counts : Client::Version.with_install_counts
+    versions = versions.where(status: filters[:status]) if filters[:status].present?
+    versions = if discarded
+      sort(versions, columns: SortConstants::Columns::VERSION, default_column: :discarded_at)
+    else
+      sort(versions, columns: SortConstants::Columns::VERSION)
+    end
     pagy, records = pagy(versions)
 
     render_json_response(
       status_code: 200,
-      message: version_message(MessageService::Version::FETCHED),
-      data: Client::VersionAdminSerializer.paginated(records, pagy),
-      pagy: pagy
-    )
-  end
-
-  # GET /v1/admin/client/versions/discarded
-  def read_discarded
-    versions = Client::Version.with_discarded.discarded.with_install_counts
-    versions = sort(versions, columns: SortConstants::Columns::VERSION, default_column: :discarded_at)
-    pagy, records = pagy(versions)
-
-    render_json_response(
-      status_code: 200,
-      message: version_message(MessageService::Version::DISCARDED_FETCHED),
-      data: Client::VersionAdminSerializer.paginated(records, pagy),
-      pagy: pagy
+      message: version_message(discarded ? MessageService::Version::DISCARDED_FETCHED : MessageService::Version::FETCHED),
+      **Client::VersionAdminSerializer.collection_pagy(records, pagy)
     )
   end
 
@@ -39,7 +30,7 @@ class V1::Admin::Client::VersionsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: version_message(MessageService::Version::FETCHED),
-      data: Client::VersionAdminSerializer.new(@version).serializable_hash[:data][:attributes]
+      data: Client::VersionAdminSerializer.record(@version)
     )
   end
 
@@ -52,7 +43,7 @@ class V1::Admin::Client::VersionsController < V1::ApplicationController
       render_json_response(
         status_code: 201,
         message: version_message(MessageService::Version::CREATED),
-        data: Client::VersionAdminSerializer.new(version).serializable_hash[:data][:attributes]
+        data: Client::VersionAdminSerializer.record(version)
       )
     else
       render_json_response(
@@ -69,7 +60,7 @@ class V1::Admin::Client::VersionsController < V1::ApplicationController
       render_json_response(
         status_code: 200,
         message: version_message(MessageService::Version::UPDATED),
-        data: Client::VersionAdminSerializer.new(@version).serializable_hash[:data][:attributes]
+        data: Client::VersionAdminSerializer.record(@version)
       )
     else
       render_json_response(
@@ -97,7 +88,7 @@ class V1::Admin::Client::VersionsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: version_message(MessageService::Version::RESTORED),
-      data: Client::VersionAdminSerializer.new(@version).serializable_hash[:data][:attributes]
+      data: Client::VersionAdminSerializer.record(@version)
     )
   end
 
@@ -110,19 +101,22 @@ class V1::Admin::Client::VersionsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: user_version_message(MessageService::UserVersion::FETCHED),
-      data: Client::UserVersionAdminSerializer.paginated(page_records, pagy),
-      pagy: pagy
+      **Client::UserVersionAdminSerializer.collection_pagy(page_records, pagy)
     )
   end
 
   private
 
+  def filter_params
+    params.permit(:discarded, :status)
+  end
+
   def set_active_version
-    @version = Client::Version.find(params[:id])
+    @version = Client::Version.find(params.permit(:id)[:id])
   end
 
   def set_version_including_discarded
-    @version = Client::Version.with_discarded.find(params[:id])
+    @version = Client::Version.with_discarded.find(params.permit(:id)[:id])
   end
 
   def version_params
@@ -133,7 +127,8 @@ class V1::Admin::Client::VersionsController < V1::ApplicationController
       :is_force_update,
       :status,
       :ios_build_number,
-      :android_build_number
+      :android_build_number,
+      metadata: {}
     )
 
     %i[ios_build_number android_build_number].each do |key|

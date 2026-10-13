@@ -48,6 +48,79 @@ RSpec.describe "Admin IAM roles", type: :request do
     expect(response_status["message"]).to eq(I18n.t("iam.roles.deleted", locale: :my))
   end
 
+  it "notifies assigned users when role permissions change" do
+    role = create(:role, name: "product_admin")
+    assigned_user = create(:user)
+    create(:user_role, user: assigned_user, role: role)
+    create(:user)
+    permission = create(:permission, action: "read", resource: IamConstants::Resource::PAYMENT_PRODUCTS)
+    allow(NotificationService::Center).to receive(:iam_updated)
+
+    patch "/v1/admin/iam/roles/#{role.id}",
+          params: { permission_ids: [ permission.id ] },
+          headers: headers
+
+    expect(response).to have_http_status(:ok)
+    expect(NotificationService::Center).to have_received(:iam_updated).with(assigned_user).once
+    expect(NotificationService::Center).to have_received(:iam_updated).once
+  end
+
+  it "notifies assigned users when a role is discarded, undiscarded, or destroyed" do
+    role = create(:role, name: "support_agent")
+    assigned_user = create(:user)
+    create(:user_role, user: assigned_user, role: role)
+    allow(NotificationService::Center).to receive(:iam_updated)
+
+    post "/v1/admin/iam/roles/#{role.id}/discard", headers: headers
+    expect(response).to have_http_status(:ok)
+    expect(NotificationService::Center).to have_received(:iam_updated).with(assigned_user).once
+
+    post "/v1/admin/iam/roles/#{role.id}/undiscard", headers: headers
+    expect(response).to have_http_status(:ok)
+    expect(NotificationService::Center).to have_received(:iam_updated).with(assigned_user).twice
+
+    delete "/v1/admin/iam/roles/#{role.id}", headers: headers
+    expect(response).to have_http_status(:ok)
+    expect(NotificationService::Center).to have_received(:iam_updated).with(assigned_user).exactly(3).times
+  end
+
+  it "does not notify assigned users when role permissions are unchanged" do
+    permission = create(:permission, action: "read", resource: IamConstants::Resource::PAYMENT_PRODUCTS)
+    role = create(:role, name: "product_admin")
+    create(:role_permission, role: role, permission: permission)
+    assigned_user = create(:user)
+    create(:user_role, user: assigned_user, role: role)
+    allow(NotificationService::Center).to receive(:iam_updated)
+
+    patch "/v1/admin/iam/roles/#{role.id}",
+          params: { permission_ids: [ permission.id ] },
+          headers: headers
+
+    expect(response).to have_http_status(:ok)
+    expect(NotificationService::Center).not_to have_received(:iam_updated)
+  end
+
+  it "allows adding but prevents removing super admin permissions" do
+    role = admin.roles.find_by!(name: IamConstants::Role::SUPER_ADMIN)
+    existing_permission = create(:permission, action: "read", resource: "users")
+    added_permission = create(:permission, action: "read", resource: "notifications")
+    create(:role_permission, role: role, permission: existing_permission)
+
+    patch "/v1/admin/iam/roles/#{role.id}",
+          params: { permission_ids: [ existing_permission.id, added_permission.id ] },
+          headers: headers
+
+    expect(response).to have_http_status(:ok)
+    expect(role.reload.permission_ids).to contain_exactly(existing_permission.id, added_permission.id)
+
+    patch "/v1/admin/iam/roles/#{role.id}",
+          params: { permission_ids: [ added_permission.id ] },
+          headers: headers
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(role.reload.permission_ids).to contain_exactly(existing_permission.id, added_permission.id)
+  end
+
   it "rejects system role deletion with i18n messages" do
     role = create(:role, name: "system_admin", system: true)
 
@@ -56,6 +129,15 @@ RSpec.describe "Admin IAM roles", type: :request do
     expect(response).to have_http_status(:unprocessable_content)
     expect(response_status["message"]).to eq(I18n.t("iam.roles.system_delete_forbidden", locale: :my))
     expect(response_status["error"]).to eq(I18n.t("iam.roles.system_delete_error", locale: :my))
+  end
+
+  it "rejects system role discard" do
+    role = create(:role, name: "system_operator", system: true)
+
+    post "/v1/admin/iam/roles/#{role.id}/discard", headers: headers
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(role.reload).to be_kept
   end
 
   it "requires super admin access" do
@@ -74,7 +156,9 @@ RSpec.describe "Admin IAM roles", type: :request do
     it "shows a role" do
       get "/v1/admin/iam/roles/#{role.id}", headers: headers
       expect(response).to have_http_status(:ok)
-      expect(response_data).to include("name" => role.name, "description" => role.description)
+      expect(response_data["id"]).to eq(role.id)
+      expect(response_data.dig("attributes", "name")).to eq(role.name)
+      expect(response_data.dig("attributes", "description")).to eq(role.description)
     end
 
     it "returns 404 for non-existent role" do

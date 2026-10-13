@@ -42,26 +42,38 @@ RSpec.describe "Admin users", type: :request do
           headers: headers
 
     expect(response).to have_http_status(:ok)
-    expect(response_data["avatar_asset_id"]).to eq(avatar_asset.id)
-    expect(response_data["avatar_url"]).to eq(avatar_asset.url)
+    expect(response_data.dig("attributes", "avatar_asset_id")).to eq(avatar_asset.id)
+    expect(response_data.dig("attributes", "avatar_url")).to eq(avatar_asset.url)
     expect(avatar_asset.reload.assetable).to eq(user)
   end
 
-  it "discards and restores a user with localized messages" do
+  it "discards and restores a user with localized messages, rotating JTI and invalidating sessions" do
     grant_admin_user_permission(:delete)
+    old_jti = user.jti
+    allow(CacheService).to receive(:delete)
+    allow(SocketService::Client).to receive(:broadcast)
 
     post "/v1/admin/users/#{user.id}/discard", headers: headers.merge("X-Locale" => "my")
 
     expect(response).to have_http_status(:ok)
     expect(response_status["message"]).to eq(I18n.t("admin.user.user_discarded", locale: :my))
-    expect(response_data).to include("id" => user.id, "discarded_at" => be_present)
+    expect(response_data["id"]).to eq(user.id)
+    expect(response_data.dig("attributes", "discarded_at")).to be_present
     expect(User.with_discarded.find(user.id)).to be_discarded
+    expect(user.reload.jti).not_to eq(old_jti)
+    expect(CacheService).to have_received(:delete).with(AuthConstants::Session.key(user.id, AuthConstants::Platform::WEB))
+    expect(SocketService::Client).to have_received(:broadcast).with(
+      user_id: user.id,
+      message: anything,
+      data: { type: NotificationConstants::NotificationType::SESSION_INVALIDATED }
+    )
 
     post "/v1/admin/users/#{user.id}/undiscard", headers: headers
 
     expect(response).to have_http_status(:ok)
     expect(response_status["message"]).to eq(I18n.t("admin.user.user_restored"))
-    expect(response_data).to include("id" => user.id, "undiscarded_at" => be_present)
+    expect(response_data["id"]).to eq(user.id)
+    expect(response_data.dig("attributes", "undiscarded_at")).to be_present
     expect(User.find(user.id)).to be_kept
   end
 
@@ -70,7 +82,7 @@ RSpec.describe "Admin users", type: :request do
     grant_admin_user_permission(:read)
     user.discard!
 
-    get "/v1/admin/users/discarded", headers: headers
+    get "/v1/admin/users", params: { discarded: true }, headers: headers
 
     expect(response).to have_http_status(:ok)
     expect(response_data).to include(hash_including("id" => user.id))
@@ -83,6 +95,16 @@ RSpec.describe "Admin users", type: :request do
 
     expect(response).to have_http_status(:unprocessable_content)
     expect(response_status["message"]).to eq(I18n.t("admin.user.self_lifecycle_protected"))
+  end
+
+  it "prevents discarding any super admin account" do
+    another_super_admin = create(:user, :super_admin)
+
+    post "/v1/admin/users/#{another_super_admin.id}/discard", headers: headers
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response_status["message"]).to eq(I18n.t("admin.user.super_admin_lifecycle_protected"))
+    expect(another_super_admin.reload).to be_kept
   end
 
   it "localizes user validation errors from X-Locale" do
@@ -104,7 +126,8 @@ RSpec.describe "Admin users", type: :request do
       grant_admin_user_permission(:read)
       get "/v1/admin/users/#{user.id}", headers: headers
       expect(response).to have_http_status(:ok)
-      expect(response_data).to include("name" => user.name, "email" => user.email)
+      expect(response_data["id"]).to eq(user.id)
+      expect(response_data["attributes"]).to include("name" => user.name, "email" => user.email)
     end
 
     it "returns 404 for non-existent user" do
@@ -125,21 +148,6 @@ RSpec.describe "Admin users", type: :request do
       names = response_data.map { |u| u.dig("attributes", "name") }
       expect(names).to include("Alice")
       expect(names).not_to include("Bob")
-    end
-  end
-
-  describe "POST /v1/admin/users role assignment" do
-    it "assigns roles on creation" do
-      grant_admin_user_permission(:create)
-      role = create(:role, name: "test_role")
-
-      post "/v1/admin/users",
-           params: { user: valid_user_params.merge(role_ids: [ role.id ]) },
-           headers: headers
-
-      expect(response).to have_http_status(:created)
-      created_user = User.find_by(email: valid_user_params[:email])
-      expect(created_user.roles).to include(role)
     end
   end
 

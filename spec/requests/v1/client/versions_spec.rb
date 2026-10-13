@@ -2,16 +2,25 @@ require "rails_helper"
 
 RSpec.describe "V1 Versions API", type: :request do
   describe "GET /v1/client/versions/current" do
-    it "returns an empty version payload without requiring authentication" do
+    it "returns an empty version payload with skip_premium true for app store review mode when no version is published" do
       get "/v1/client/versions/current", params: { version: "1.0.0" }
 
       expect(response).to have_http_status(:ok)
       expect(response_status["message"]).to eq(I18n.t("version.current_fetched"))
-      expect(response_data.dig("version", "number")).to be_nil
-      expect(response_data.dig("version", "update_required")).to be(false)
-      expect(response_data.dig("version", "must_update")).to be(false)
-      expect(response_data.dig("version", "skip_premium")).to be(false)
+      version_attrs = response_data["attributes"] || response_data
+      expect(version_attrs["number"]).to be_nil
+      expect(version_attrs["update_required"]).to be(false)
+      expect(version_attrs["must_update"]).to be(false)
+      expect(version_attrs["skip_premium"]).to be(true)
       expect(Client::UserVersion.count).to eq(0)
+    end
+
+    it "returns skip_premium false when client version is omitted or blank" do
+      get "/v1/client/versions/current"
+
+      expect(response).to have_http_status(:ok)
+      version_attrs = response_data["attributes"] || response_data
+      expect(version_attrs["skip_premium"]).to be(false)
     end
 
     it "returns the latest live release and computed update flags" do
@@ -32,15 +41,16 @@ RSpec.describe "V1 Versions API", type: :request do
           headers: { "X-Platform" => AuthConstants::Platform::IOS }
 
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("version", "number")).to eq("1.2.0")
-      expect(response_data.dig("version", "title")).to eq("Latest")
-      expect(response_data.dig("version", "update_required")).to be(true)
-      expect(response_data.dig("version", "must_update")).to be(true)
-      expect(response_data.dig("version", "skip_premium")).to be(false)
-      expect(response_data.dig("version", "store_url")).to eq("https://apps.apple.com/app/rexone")
-      expect(response_data["version"]).not_to have_key("is_force_update")
-      expect(response_data["version"]).not_to have_key("ios_build_number")
-      expect(response_data["version"]).not_to have_key("android_build_number")
+      version_attrs = response_data["attributes"] || response_data
+      expect(version_attrs["number"]).to eq("1.2.0")
+      expect(version_attrs["title"]).to eq("Latest")
+      expect(version_attrs["update_required"]).to be(true)
+      expect(version_attrs["must_update"]).to be(true)
+      expect(version_attrs["skip_premium"]).to be(false)
+      expect(version_attrs["store_url"]).to eq("https://apps.apple.com/app/rexone")
+      expect(version_attrs).not_to have_key("is_force_update")
+      expect(version_attrs).not_to have_key("ios_build_number")
+      expect(version_attrs).not_to have_key("android_build_number")
       expect(Client::UserVersion.count).to eq(0)
     end
 
@@ -50,9 +60,10 @@ RSpec.describe "V1 Versions API", type: :request do
       get "/v1/client/versions/current", params: { version: "1.2.0" }
 
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("version", "update_required")).to be(false)
-      expect(response_data.dig("version", "must_update")).to be(false)
-      expect(response_data.dig("version", "skip_premium")).to be(false)
+      version_attrs = response_data["attributes"] || response_data
+      expect(version_attrs["update_required"]).to be(false)
+      expect(version_attrs["must_update"]).to be(false)
+      expect(version_attrs["skip_premium"]).to be(false)
     end
 
     it "marks update_required without must_update when the client is behind a non-force latest" do
@@ -61,9 +72,10 @@ RSpec.describe "V1 Versions API", type: :request do
       get "/v1/client/versions/current", params: { version: "1.0.0" }
 
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("version", "update_required")).to be(true)
-      expect(response_data.dig("version", "must_update")).to be(false)
-      expect(response_data.dig("version", "skip_premium")).to be(false)
+      version_attrs = response_data["attributes"] || response_data
+      expect(version_attrs["update_required"]).to be(true)
+      expect(version_attrs["must_update"]).to be(false)
+      expect(version_attrs["skip_premium"]).to be(false)
     end
 
     it "skips premium when the client marketing number is newer than the latest live release" do
@@ -73,10 +85,11 @@ RSpec.describe "V1 Versions API", type: :request do
       get "/v1/client/versions/current", params: { version: "1.3.0" }
 
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("version", "number")).to eq("1.2.0")
-      expect(response_data.dig("version", "update_required")).to be(false)
-      expect(response_data.dig("version", "must_update")).to be(false)
-      expect(response_data.dig("version", "skip_premium")).to be(true)
+      version_attrs = response_data["attributes"] || response_data
+      expect(version_attrs["number"]).to eq("1.2.0")
+      expect(version_attrs["update_required"]).to be(false)
+      expect(version_attrs["must_update"]).to be(false)
+      expect(version_attrs["skip_premium"]).to be(true)
     end
 
     it "does not write a Client::UserVersion even with a valid JWT" do

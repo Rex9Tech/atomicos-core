@@ -1,10 +1,17 @@
 # app/serializers/payment/subscription_serializer.rb
 class Payment::SubscriptionSerializer < ApplicationSerializer
   attributes :id,
-            :stripe_subscription_id,
-            :stripe_customer_id,
+            :provider,
+            :provider_subscription_id,
+            :provider_customer_id,
+            :provider_subscription_item_id,
+            :provider_price_id,
             :status,
-            :cycle,
+            :currency,
+            :unit_amount,
+            :quantity,
+            :interval,
+            :interval_count,
             :payment_method_id,
             :payment_method_type,
             :current_period_start,
@@ -85,11 +92,31 @@ class Payment::SubscriptionSerializer < ApplicationSerializer
     subscription.product&.name
   end
 
+  attribute :product_code do |subscription|
+    subscription.product&.code
+  end
+
+  attribute :user_name do |subscription|
+    subscription.user&.name
+  end
+
+  attribute :username do |subscription|
+    subscription.user&.username
+  end
+
+  attribute :user_email do |subscription|
+    subscription.user&.email
+  end
+
   attribute :price do |subscription|
     subscription.product&.display_price
   end
 
   attribute :period_label do |subscription|
     subscription.product&.period_label
+  end
+
+  attribute :coupon do |subscription|
+    Payment::UserCouponSerializer.record_attributes(subscription.user_coupon)
   end
 end

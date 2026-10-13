@@ -7,7 +7,10 @@ class CreateNotifications < ActiveRecord::Migration[8.1]
       t.text :description
       t.string :category, null: false, default: "broadcast"
       t.string :link
+      t.string :cta_text
+      t.string :clients, array: true, null: false, default: %w[web mobile]
       t.boolean :admin, null: false, default: true
+      t.jsonb :metadata, default: {}
 
       # In-App / Socket
       t.string :in_app_title
@@ -44,5 +47,6 @@ class CreateNotifications < ActiveRecord::Migration[8.1]
     add_index :notifications, :event
     add_index :notifications, :category
     add_index :notifications, :discarded_at
+    add_index :notifications, :clients, using: :gin
   end
 end

@@ -13,6 +13,12 @@ class Asset < ApplicationRecord
           foreign_key: :parent_asset_id,
           dependent: :destroy,
           inverse_of: :parent_asset
+  has_many :subtitles,
+           -> { where(type: AssetConstants::AssetType::SUBTITLE).order(created_at: :asc) },
+           class_name: "Asset",
+           foreign_key: :parent_asset_id,
+           dependent: :destroy,
+           inverse_of: :parent_asset
 
   validates :name, presence: true
   validates :url, presence: true, uniqueness: true
@@ -26,6 +32,11 @@ class Asset < ApplicationRecord
   validates :assetable_type, presence: true, if: -> { assetable_id.present? }
   validates :assetable_id, presence: true, if: -> { assetable_type.present? }
   validate :url_must_be_valid
+  validate :only_one_thumbnail_per_parent
+  validate :child_asset_type_immutable, on: :update
+  validate :parent_asset_validations
+
+  before_validation :set_default_title
   before_validation :set_extension_and_format
   after_destroy_commit :delete_from_storage, if: :uploaded_file?
 
@@ -62,6 +73,10 @@ class Asset < ApplicationRecord
     storage_key.present?
   end
 
+  def display_name
+    title.presence || name
+  end
+
   def storage_url(options = {})
     return url unless uploaded_file? && storage_key.present?
 
@@ -86,15 +101,51 @@ class Asset < ApplicationRecord
   end
 
   def compressible?
-    !max_compressed? && (compressible_video? || compressible_image?)
+    !max_compressed? && (compressible_video? || compressible_image? || compressible_audio?)
   end
 
   def compressible_video?
-    MediaConstants::COMPRESSIBLE_VIDEO_EXTENSIONS.include?(extension&.downcase)
+    MediaConstants::Processing::COMPRESSION_EXTENSIONS.fetch(AssetConstants::AssetFormat::VIDEO).include?(extension&.downcase)
   end
 
   def compressible_image?
-    MediaConstants::COMPRESSIBLE_IMAGE_EXTENSIONS.include?(extension&.downcase)
+    MediaConstants::Processing::COMPRESSION_EXTENSIONS.fetch(AssetConstants::AssetFormat::IMAGE).include?(extension&.downcase)
+  end
+
+  def compressible_audio?
+    MediaConstants::Processing::COMPRESSION_EXTENSIONS.fetch(AssetConstants::AssetFormat::AUDIO).include?(extension&.downcase)
+  end
+
+  def thumbnail_attachable?
+    thumbnail_generatable? || compressible_audio?
+  end
+
+  def thumbnail_generatable?
+    MediaConstants::Processing::THUMBNAIL_GENERATION_EXTENSIONS.include?(extension&.downcase)
+  end
+
+  def image_convertible?
+    MediaConstants::Processing::IMAGE_CONVERSION_EXTENSIONS.include?(extension&.downcase)
+  end
+
+  def subtitle_attachable?
+    compressible_video? || compressible_audio?
+  end
+
+  def playable?
+    playable_format? && playable_status? && storage_key.present?
+  end
+
+  def playable_format?
+    MediaConstants::Playback::PLAYABLE_FORMATS.include?(format)
+  end
+
+  def playable_status?
+    MediaConstants::Playback::PLAYABLE_STATUSES.include?(status)
+  end
+
+  def mime_type
+    Rack::Mime.mime_type(".#{extension}", "application/octet-stream")
   end
 
   def pending?
@@ -160,6 +211,32 @@ class Asset < ApplicationRecord
     "asset_compression_count:#{id}"
   end
 
+  def only_one_thumbnail_per_parent
+    return unless parent_asset_id.present? && type == AssetConstants::AssetType::THUMBNAIL
+
+    duplicate = Asset.where(parent_asset_id: parent_asset_id, type: AssetConstants::AssetType::THUMBNAIL)
+    duplicate = duplicate.where.not(id: id) if persisted?
+    errors.add(:type, :thumbnail_exists_for_parent) if duplicate.exists?
+  end
+
+  def child_asset_type_immutable
+    if parent_asset_id_was.present? && type_changed?
+      errors.add(:type, "Child asset type cannot be changed")
+    end
+  end
+
+  def parent_asset_validations
+    return unless parent_asset_id.present?
+
+    if parent_asset_id == id
+      errors.add(:parent_asset_id, "cannot be itself")
+    elsif parent_asset&.parent_asset_id.present?
+      errors.add(:parent_asset_id, "cannot be a child asset")
+    elsif (thumbnail.present? || subtitles.any?) && parent_asset_id.present?
+      errors.add(:parent_asset_id, "asset with existing children cannot become a child asset")
+    end
+  end
+
   def storage_resource_type
     AssetConstants::AssetFormat.storage_resource_type(extension)
   end
@@ -170,10 +247,10 @@ class Asset < ApplicationRecord
     uri = URI.parse(url)
 
     unless uri.is_a?(URI::HTTP) && uri.host.present?
-      errors.add(:url, "must be a valid URL")
+      errors.add(:url, :invalid_url)
     end
   rescue URI::InvalidURIError
-    errors.add(:url, "must be a valid URL")
+    errors.add(:url, :invalid_url)
   end
 
   def set_extension_and_format
@@ -201,5 +278,9 @@ class Asset < ApplicationRecord
 
   def image_type?
     AssetConstants::AssetType::IMAGE_TYPES.include?(type)
+  end
+
+  def set_default_title
+    self.title = name if title.blank? && name.present?
   end
 end

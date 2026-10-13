@@ -23,6 +23,8 @@ module MessageService
     WELCOME_BODY = "notification.welcome.body"
     SIGN_IN_ALERT_TITLE = "notification.sign_in_alert.title"
     SIGN_IN_ALERT_BODY = "notification.sign_in_alert.body"
+    IAM_UPDATED_TITLE = "notification.iam_updated.title"
+    IAM_UPDATED_BODY = "notification.iam_updated.body"
     NOTIFICATIONS_FETCHED = "notification.notifications_fetched"
     UNREAD_COUNT_FETCHED = "notification.unread_count_fetched"
     MARKED_AS_READ = "notification.marked_as_read"
@@ -37,5 +39,10 @@ module MessageService
     NOTIFICATION_UPDATED = "notification.notification_updated"
     NOTIFICATION_DISCARDED = "notification.notification_discarded"
     NOTIFICATION_UNDISCARDED = "notification.notification_undiscarded"
+    BATCH_DISCARDED = "notification.batch_discarded"
+    BATCH_RESTORED = "notification.batch_restored"
+    BATCH_DELETED = "notification.batch_deleted"
+    RECYCLE_BIN_EMPTIED = "notification.recycle_bin_emptied"
+    NO_NOTIFICATIONS_SELECTED = "notification.no_notifications_selected"
   end
 end

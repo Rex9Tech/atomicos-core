@@ -1,5 +1,3 @@
-# syntax = docker/dockerfile:1
-
 # This Dockerfile is designed for production, not development. Use with Kamal or build'n'run by hand:
 # docker build -t my-app .
 # docker run -d -p 80:80 -p 443:443 --name my-app -e RAILS_MASTER_KEY=<value from config/master.key> my-app
@@ -21,9 +19,8 @@ RUN apt-get update -qq && \
       ffmpeg \
       libjemalloc2 \
       libvips \
-      poppler-utils \
-      postgresql-client \
-      unzip && \
+      librsvg2-bin \
+      postgresql-client && \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/archives
 
 # Set production environment
@@ -92,5 +89,9 @@ ENTRYPOINT ["/rails/bin/docker-entrypoint"]
 
 # Start the server by default, this can be overwritten at runtime
 EXPOSE 3000
+
+# Healthcheck for Coolify / Docker orchestrators
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
+  CMD curl -f http://127.0.0.1:3000/up || exit 1
 
 CMD ["./bin/rails", "server", "-b", "0.0.0.0"]

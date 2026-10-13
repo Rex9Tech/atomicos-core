@@ -19,17 +19,19 @@ class Payment::ProductDashboard < Administrate::BaseDashboard
     created_by_id: Field::String,
     creator: Field::BelongsTo,
     currency: Field::Select.with_options(searchable: false, collection: ->(field) { field.resource.class.send(field.attribute.to_s.pluralize).keys }),
-    cycle: Field::Select.with_options(searchable: false, collection: ->(field) { field.resource.class.send(field.attribute.to_s.pluralize).keys }),
+    interval: Field::Select.with_options(searchable: false, collection: ->(field) { field.resource.class.send(field.attribute.to_s.pluralize).keys }),
     description: Field::Text,
     discarded_at: Field::DateTime,
     discarded_by_id: Field::String,
     discarder: Field::BelongsTo,
     name: Field::String,
-    price_unit_amount: Field::Number,
-    stripe_price_id: Field::String,
+    unit_amount: Field::Number,
     stripe_product_id: Field::String,
+    stripe_price_id: Field::String,
+    google_play_product_id: Field::String,
+    app_store_product_id: Field::String,
     subscriptions: Field::HasMany,
-    transactions: Field::HasMany,
+    purchases: Field::HasMany,
     undiscarded_at: Field::DateTime,
     undiscarded_by_id: Field::String,
     undiscarder: Field::BelongsTo,
@@ -46,8 +48,8 @@ class Payment::ProductDashboard < Administrate::BaseDashboard
   # Feel free to add, remove, or rearrange items.
   COLLECTION_ATTRIBUTES = %i[
     name
-    cycle
-    price_unit_amount
+    interval
+    unit_amount
     currency
     active
   ].freeze
@@ -61,17 +63,19 @@ class Payment::ProductDashboard < Administrate::BaseDashboard
     created_by_id
     creator
     currency
-    cycle
+    interval
     description
     discarded_at
     discarded_by_id
     discarder
     name
-    price_unit_amount
-    stripe_price_id
+    unit_amount
     stripe_product_id
+    stripe_price_id
+    google_play_product_id
+    app_store_product_id
     subscriptions
-    transactions
+    purchases
     undiscarded_at
     undiscarded_by_id
     undiscarder
@@ -90,17 +94,19 @@ class Payment::ProductDashboard < Administrate::BaseDashboard
     created_by_id
     creator
     currency
-    cycle
+    interval
     description
     discarded_at
     discarded_by_id
     discarder
     name
-    price_unit_amount
-    stripe_price_id
+    unit_amount
     stripe_product_id
+    stripe_price_id
+    google_play_product_id
+    app_store_product_id
     subscriptions
-    transactions
+    purchases
     undiscarded_at
     undiscarded_by_id
     undiscarder

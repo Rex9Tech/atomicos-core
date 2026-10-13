@@ -5,7 +5,7 @@ require_relative "error"
 module StorageService
   class Garage < Base
     LOG_PREFIX = "[Garage]".freeze
-    ENVIRONMENT_PREFIXES = %w[dev uat prod].freeze
+    ENVIRONMENT_PREFIXES = AssetConstants::ENVIRONMENT_PREFIXES
 
     attr_reader :client, :public_client
 
@@ -15,7 +15,7 @@ module StorageService
       @bucket = AppConfig::S3_BUCKET
       @public_endpoint = AppConfig::S3_PUBLIC_ENDPOINT
 
-      common_options = {
+      @common_options = {
         access_key_id: AppConfig::S3_ACCESS_KEY,
         secret_access_key: AppConfig::S3_SECRET_KEY,
         region: AppConfig::S3_REGION,
@@ -23,14 +23,29 @@ module StorageService
       }
 
       @client = Aws::S3::Client.new(
-        common_options.merge(endpoint: AppConfig::S3_ENDPOINT)
+        @common_options.merge(endpoint: AppConfig::S3_ENDPOINT)
       )
 
       @public_client = Aws::S3::Client.new(
-        common_options.merge(endpoint: @public_endpoint)
+        @common_options.merge(endpoint: @public_endpoint)
       )
     rescue KeyError => e
       raise Error, "Missing Garage configuration: #{e.message}"
+    end
+
+    def public_client_for(public_host = nil)
+      return @public_client if public_host.blank?
+
+      uri = URI.parse(@public_endpoint)
+      host_only = public_host.to_s.split(":").first
+      return @public_client if host_only.blank? || host_only == uri.host
+
+      dynamic_endpoint = "#{uri.scheme}://#{host_only}:#{uri.port}"
+      Aws::S3::Client.new(
+        @common_options.merge(endpoint: dynamic_endpoint)
+      )
+    rescue URI::InvalidURIError
+      @public_client
     end
 
     def upload(file, options = {})
@@ -87,14 +102,14 @@ module StorageService
         expires_in: expiry
       }
 
-      content_type = options[:response_content_type] || options[:content_type]
-      content_type ||= Rack::Mime.mime_type(File.extname(key.to_s), nil)
+      content_type = options[:response_content_type].presence || Rack::Mime.mime_type(File.extname(key.to_s), nil)
       presign_params[:response_content_type] = content_type if content_type.present?
 
-      disposition = options[:response_content_disposition] || options[:disposition]
+      disposition = options[:response_content_disposition]
       presign_params[:response_content_disposition] = disposition if disposition.present?
 
-      signer = Aws::S3::Presigner.new(client: @public_client)
+      target_client = public_client_for(options[:public_host])
+      signer = Aws::S3::Presigner.new(client: target_client)
       signer.presigned_url(:get_object, **presign_params)
     rescue Aws::S3::Errors::ServiceError, ArgumentError => e
       Rails.logger.error("#{LOG_PREFIX} URL presigning error: #{e.message}")
@@ -195,6 +210,31 @@ module StorageService
       }
     rescue Aws::S3::Errors::ServiceError => e
       Rails.logger.error("#{LOG_PREFIX} Signed URL Error: #{e.message}")
+      raise Error, e.message
+    end
+
+    def playback_url(asset, expires_in:, public_host: nil)
+      key = apply_prefix(asset.storage_key)
+      content_type = Rack::Mime.mime_type(".#{asset.extension}", "application/octet-stream")
+
+      target_client = public_client_for(public_host)
+      signer = Aws::S3::Presigner.new(client: target_client)
+      signed_url = signer.presigned_url(
+        :get_object,
+        bucket: @bucket,
+        key: key,
+        expires_in: expires_in,
+        response_content_type: content_type,
+        response_content_disposition: "inline"
+      )
+
+      {
+        type: MediaConstants::Playback::DELIVERY_TYPE_PROGRESSIVE,
+        url: signed_url,
+        expires_at: Time.current + expires_in.seconds
+      }
+    rescue Aws::S3::Errors::ServiceError, ArgumentError => e
+      Rails.logger.error("#{LOG_PREFIX} Playback URL Error: #{e.message}")
       raise Error, e.message
     end
 
@@ -360,11 +400,7 @@ module StorageService
     end
 
     def folder_prefix
-      raw = if defined?(AppConfig::S3_FOLDER_PREFIX)
-              AppConfig::S3_FOLDER_PREFIX
-      else
-              ENV["S3_FOLDER_PREFIX"]
-      end
+      raw = AppConfig::S3_FOLDER_PREFIX if defined?(AppConfig::S3_FOLDER_PREFIX)
       raw.to_s.strip.gsub(%r{\A/+|/+$}, "").presence
     end
 

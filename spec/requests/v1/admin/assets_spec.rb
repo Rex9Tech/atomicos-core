@@ -25,7 +25,7 @@ RSpec.describe "V1 Admin Assets API", type: :request do
 
     it "filters assets by status, type, and format" do
       create(:asset, status: "pending", type: "thumbnail", format: "image")
-      create(:asset, status: "ready", type: "video", format: "video")
+      create(:asset, status: "ready", type: "general", format: "video")
 
       get "/v1/admin/assets", params: { status: "pending", type: "thumbnail", format: "image" }, headers: headers
 
@@ -35,11 +35,42 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       expect(response_data.first.dig("attributes", "type")).to eq("thumbnail")
     end
 
+    it "defaults to parent assets and can include child assets by record scope" do
+      parent = create(:asset, type: "general", format: "video")
+      child = create(:asset, type: "subtitle", format: "subtitle", parent_asset: parent)
+
+      get "/v1/admin/assets", headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_data.map { |asset| asset.dig("attributes", "id") }).to contain_exactly(parent.id)
+
+      get "/v1/admin/assets", params: { record_scope: "children" }, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_data.map { |asset| asset.dig("attributes", "id") }).to contain_exactly(child.id)
+
+      get "/v1/admin/assets", params: { record_scope: "all" }, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_data.map { |asset| asset.dig("attributes", "id") }).to contain_exactly(parent.id, child.id)
+    end
+
     it "searches assets by name or storage_key" do
       needle = create(:asset, name: "Special Needle Asset", storage_key: "keys/special")
       create(:asset, name: "Other Asset", storage_key: "keys/other")
 
       get "/v1/admin/assets", params: { search: "Needle" }, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_data.size).to eq(1)
+      expect(response_data.first.dig("attributes", "id")).to eq(needle.id)
+    end
+
+    it "searches assets by title" do
+      needle = create(:asset, name: "asset_key_123", title: "Special Meditation Guide", storage_key: "keys/guide")
+      create(:asset, name: "asset_key_456", title: "Routine File", storage_key: "keys/routine")
+
+      get "/v1/admin/assets", params: { search: "Meditation" }, headers: headers
 
       expect(response).to have_http_status(:ok)
       expect(response_data.size).to eq(1)
@@ -71,6 +102,22 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response_data.first.dig("attributes", "name")).to eq("Resilient Asset")
     end
+
+    it "sorts assets by title" do
+      asset_b = create(:asset, title: "Beta Asset")
+      asset_a = create(:asset, title: "Alpha Asset")
+      asset_c = create(:asset, title: "Gamma Asset")
+
+      get "/v1/admin/assets", params: { sort_by: "title", sort_order: "asc" }, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_data.map { |a| a.dig("attributes", "id") }).to eq([ asset_a.id, asset_b.id, asset_c.id ])
+
+      get "/v1/admin/assets", params: { sort_by: "title", sort_order: "desc" }, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_data.map { |a| a.dig("attributes", "id") }).to eq([ asset_c.id, asset_b.id, asset_a.id ])
+    end
   end
 
   describe "GET /v1/admin/assets/:id" do
@@ -80,9 +127,9 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       get "/v1/admin/assets/#{asset.id}", headers: headers
 
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("asset", "id")).to eq(asset.id)
-      expect(response_data.dig("asset", "status")).to eq("ready")
-      expect(response_data.dig("asset")).not_to have_key("created_by_id")
+      expect(response_data["id"]).to eq(asset.id)
+      expect(response_data.dig("attributes", "status")).to eq("ready")
+      expect(response_data["attributes"]).not_to have_key("created_by_id")
     end
 
     it "allows direct access to an asset from another environment partition" do
@@ -92,7 +139,7 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       get "/v1/admin/assets/#{prod_asset.id}", headers: headers
 
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("asset", "id")).to eq(prod_asset.id)
+      expect(response_data["id"]).to eq(prod_asset.id)
     end
   end
 
@@ -115,60 +162,142 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       end.to change(Asset, :count).by(1)
 
       expect(response).to have_http_status(:created)
-      expect(response_data.dig("asset", "type")).to eq("thumbnail")
+      expect(response_data.dig("attributes", "type")).to eq("thumbnail")
       expect(StorageService::Client).to have_received(:upload).with(
         anything,
         hash_including(storage_key: a_string_matching(/^admin\/thumbnail_avatar_\d+\.png$/))
       )
     end
 
+    it "persists title and description on upload" do
+      post "/v1/admin/assets/upload",
+           params: { file: image_file, type: "thumbnail", title: "Admin Uploaded Avatar", description: "Admin photo" },
+           headers: headers
+
+      expect(response).to have_http_status(:created)
+      expect(Asset.last).to have_attributes(
+        title: "Admin Uploaded Avatar",
+        description: "Admin photo"
+      )
+      expect(response_data.dig("attributes", "title")).to eq("Admin Uploaded Avatar")
+      expect(response_data.dig("attributes", "description")).to eq("Admin photo")
+    end
+
     it "rejects files exceeding maximum size with localized error message" do
-      allow_any_instance_of(ActionDispatch::Http::UploadedFile).to receive(:size).and_return(MediaConstants::MAX_NON_VIDEO_SIZE_MB.megabytes + 1)
+      allow_any_instance_of(ActionDispatch::Http::UploadedFile).to receive(:size).and_return(MediaConstants::MAX_IMAGE_SIZE_MB.megabytes + 1)
 
       post "/v1/admin/assets/upload", params: { file: image_file, type: "thumbnail" }, headers: headers
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(response_status["error"]).to eq("File size exceeds maximum allowed limit (#{MediaConstants::MAX_NON_VIDEO_SIZE_MB}MB).")
+      expect(response_status["error"]).to eq("File size exceeds maximum allowed limit (#{MediaConstants::MAX_IMAGE_SIZE_MB}MB).")
     end
 
     it "returns localized error message in Burmese when X-Locale is my" do
-      allow_any_instance_of(ActionDispatch::Http::UploadedFile).to receive(:size).and_return(MediaConstants::MAX_NON_VIDEO_SIZE_MB.megabytes + 1)
+      allow_any_instance_of(ActionDispatch::Http::UploadedFile).to receive(:size).and_return(MediaConstants::MAX_IMAGE_SIZE_MB.megabytes + 1)
 
       post "/v1/admin/assets/upload",
            params: { file: image_file, type: "thumbnail" },
            headers: headers.merge("X-Locale" => "my")
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(response_status["error"]).to eq("ဖိုင်အရွယ်အစားသည် သတ်မှတ်ထားသော ကန့်သတ်ချက်ထက် ကျော်လွန်နေပါသည် (#{MediaConstants::MAX_NON_VIDEO_SIZE_MB}MB)။")
+      expect(response_status["error"]).to eq("ဖိုင်အရွယ်အစားသည် သတ်မှတ်ထားသော ကန့်သတ်ချက်ထက် ကျော်လွန်နေပါသည် (#{MediaConstants::MAX_IMAGE_SIZE_MB}MB)။")
+    end
+
+    it "stores SVG unchanged and queues conversion in the media worker" do
+      svg_file = fixture_file_upload("icon.svg", "image/svg+xml")
+      allow(Media::ConvertImageJob).to receive(:perform_later)
+      allow(StorageService::Client).to receive(:upload).and_return(
+        storage_key: "admin/general_icon.svg",
+        url: "https://cdn.example.com/icon.svg",
+        bytes: 8,
+        format: "svg",
+        resource_type: "image"
+      )
+
+      post "/v1/admin/assets/upload", params: { file: svg_file, type: "general" }, headers: headers
+
+      expect(response).to have_http_status(:created)
+      expect(Asset.last).to have_attributes(extension: "svg", format: "image", status: "pending")
+      expect(StorageService::Client).to have_received(:upload).with(
+        anything,
+        hash_including(storage_key: a_string_matching(/\.svg$/), resource_type: "image")
+      )
+      expect(Media::ConvertImageJob).to have_received(:perform_later).with(asset_id: Asset.last.id)
     end
   end
 
   describe "POST /v1/admin/assets/:id/compress" do
     let(:image_asset) { create(:asset, extension: "png", status: "ready") }
-    let(:video_asset) { create(:asset, extension: "mp4", status: "ready") }
+    let(:video_asset) { create(:asset, extension: "mp4", format: "video", status: "ready") }
+    let(:audio_asset) { create(:asset, extension: "wav", format: "audio", type: "general", status: "ready") }
     let(:pdf_asset) { create(:asset, extension: "pdf", status: "ready") }
 
     before do
-      allow(Media::CompressImageJob).to receive(:perform_later)
-      allow(Media::CompressVideoJob).to receive(:perform_later)
+      allow(Media::CompressMediaJob).to receive(:perform_later)
     end
 
     it "enqueues image compression for compressible image assets" do
       post "/v1/admin/assets/#{image_asset.id}/compress", headers: headers
 
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("asset", "status")).to eq("pending")
+      expect(response_data.dig("attributes", "status")).to eq("pending")
       expect(image_asset.reload.status).to eq("pending")
-      expect(Media::CompressImageJob).to have_received(:perform_later).with(asset_id: image_asset.id)
+      expect(Media::CompressMediaJob).to have_received(:perform_later).with(
+        hash_including(
+          asset_id: image_asset.id,
+          notification_user_id: admin.id,
+          operation_id: start_with("asset_compression:#{image_asset.id}:")
+        )
+      )
+      expect(response_meta["operation_id"]).to start_with("asset_compression:#{image_asset.id}:")
+    end
+
+    it "enqueues image compression for webp assets" do
+      webp_asset = create(:asset, extension: "webp", format: "image", status: "ready")
+
+      post "/v1/admin/assets/#{webp_asset.id}/compress", headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(webp_asset.reload.status).to eq("pending")
+      expect(Media::CompressMediaJob).to have_received(:perform_later).with(
+        hash_including(
+          asset_id: webp_asset.id,
+          notification_user_id: admin.id,
+          operation_id: start_with("asset_compression:#{webp_asset.id}:")
+        )
+      )
     end
 
     it "enqueues video compression for compressible video assets" do
       post "/v1/admin/assets/#{video_asset.id}/compress", headers: headers
 
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("asset", "status")).to eq("pending")
+      expect(response_data.dig("attributes", "status")).to eq("pending")
       expect(video_asset.reload.status).to eq("pending")
-      expect(Media::CompressVideoJob).to have_received(:perform_later).with(asset_id: video_asset.id)
+      expect(Media::CompressMediaJob).to have_received(:perform_later).with(
+        hash_including(
+          asset_id: video_asset.id,
+          notification_user_id: admin.id,
+          operation_id: start_with("asset_compression:#{video_asset.id}:")
+        )
+      )
+      expect(response_meta["operation_id"]).to start_with("asset_compression:#{video_asset.id}:")
+    end
+
+    it "enqueues audio compression for compressible audio assets" do
+      post "/v1/admin/assets/#{audio_asset.id}/compress", headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_data.dig("attributes", "status")).to eq("pending")
+      expect(audio_asset.reload.status).to eq("pending")
+      expect(Media::CompressMediaJob).to have_received(:perform_later).with(
+        hash_including(
+          asset_id: audio_asset.id,
+          notification_user_id: admin.id,
+          operation_id: start_with("asset_compression:#{audio_asset.id}:")
+        )
+      )
+      expect(response_meta["operation_id"]).to start_with("asset_compression:#{audio_asset.id}:")
     end
 
     it "rejects compression for non-compressible assets with 422" do
@@ -176,8 +305,7 @@ RSpec.describe "V1 Admin Assets API", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(response_status["success"]).to be(false)
-      expect(Media::CompressImageJob).not_to have_received(:perform_later)
-      expect(Media::CompressVideoJob).not_to have_received(:perform_later)
+      expect(Media::CompressMediaJob).not_to have_received(:perform_later)
     end
 
     it "rejects compression for already optimal assets with 422" do
@@ -188,7 +316,7 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
       expect(response_status["success"]).to be(false)
       expect(response_status["message"]).to eq(I18n.t("admin.asset.compression_already_optimal"))
-      expect(Media::CompressImageJob).not_to have_received(:perform_later)
+      expect(Media::CompressMediaJob).not_to have_received(:perform_later)
     end
 
     it "rejects compression for assets currently pending or processing with 422" do
@@ -199,7 +327,7 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
       expect(response_status["success"]).to be(false)
       expect(response_status["message"]).to eq(I18n.t("admin.asset.compression_in_progress"))
-      expect(Media::CompressImageJob).not_to have_received(:perform_later)
+      expect(Media::CompressMediaJob).not_to have_received(:perform_later)
     end
 
     it "requires update_asset permission" do
@@ -243,9 +371,14 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       expect(response).to have_http_status(:accepted)
       expect(response_status["success"]).to be(true)
       expect(Media::GenerateVideoThumbnailJob).to have_received(:perform_later).with(
-        asset_id: video_asset.id,
-        replace: true
+        hash_including(
+          asset_id: video_asset.id,
+          replace: true,
+          notification_user_id: admin.id,
+          operation_id: start_with("video_thumbnail:#{video_asset.id}:")
+        )
       )
+      expect(response_meta["operation_id"]).to start_with("video_thumbnail:#{video_asset.id}:")
     end
 
     it "rejects non-video assets" do
@@ -263,6 +396,8 @@ RSpec.describe "V1 Admin Assets API", type: :request do
     let(:image_file) { fixture_file_upload("avatar.png", "image/png") }
 
     before do
+      allow(Media::CompressMediaJob).to receive(:perform_later)
+      allow(Media::ConvertImageJob).to receive(:perform_later)
       allow(StorageService::Client).to receive(:upload).and_return(
         storage_key: "dev/admin/thumbnail_replacement.webp",
         url: "https://assets.example.com/thumbnail-replacement.webp",
@@ -288,9 +423,11 @@ RSpec.describe "V1 Admin Assets API", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response_status["success"]).to be(true)
-      expect(Asset.exists?(previous.id)).to be(false)
-      expect(video_asset.reload.thumbnail.storage_key).to eq("dev/admin/thumbnail_replacement.webp")
-      expect(response_data.dig("asset", "thumbnail", "url")).to include("dev/admin/thumbnail_replacement.webp")
+      expect(video_asset.reload.thumbnail).to have_attributes(
+        id: previous.id,
+        storage_key: "dev/admin/thumbnail_replacement.webp"
+      )
+      expect(response_data.dig("attributes", "children", "thumbnail", "url")).to include("dev/admin/thumbnail_replacement.webp")
       expect(StorageService::Client).to have_received(:delete).with(
         "dev/admin/thumbnail_previous.webp",
         resource_type: "image"
@@ -306,6 +443,220 @@ RSpec.describe "V1 Admin Assets API", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(response_status["success"]).to be(false)
+      expect(StorageService::Client).not_to have_received(:upload)
+    end
+
+    it "attaches a thumbnail to a type=audio parent" do
+      audio_asset = create(:asset, type: "general", format: "audio", extension: "wav")
+
+      post "/v1/admin/assets/#{audio_asset.id}/thumbnail/upload",
+           params: { file: image_file },
+           headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_status["success"]).to be(true)
+      expect(audio_asset.reload.thumbnail.storage_key).to eq("dev/admin/thumbnail_replacement.webp")
+      expect(audio_asset.thumbnail).to have_attributes(status: "pending")
+      expect(response_data.dig("attributes", "children", "thumbnail", "url")).to include("dev/admin/thumbnail_replacement.webp")
+      expect(Media::CompressMediaJob).to have_received(:perform_later).with(asset_id: audio_asset.thumbnail.id)
+    end
+
+    it "attaches a thumbnail to a compressible audio parent regardless of type" do
+      general_wav = create(:asset, type: "general", format: "audio", extension: "wav")
+
+      post "/v1/admin/assets/#{general_wav.id}/thumbnail/upload",
+           params: { file: image_file },
+           headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_status["success"]).to be(true)
+      expect(general_wav.reload.thumbnail.storage_key).to eq("dev/admin/thumbnail_replacement.webp")
+      expect(StorageService::Client).to have_received(:upload)
+    end
+
+    it "rejects a non-audio, non-video parent" do
+      pdf_asset = create(:asset, type: "general", format: "doc", extension: "pdf")
+
+      post "/v1/admin/assets/#{pdf_asset.id}/thumbnail/upload",
+           params: { file: image_file },
+           headers: headers
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response_status["success"]).to be(false)
+      expect(StorageService::Client).not_to have_received(:upload)
+    end
+
+    it "stores an SVG thumbnail and queues conversion in the media worker" do
+      svg_file = fixture_file_upload("icon.svg", "image/svg+xml")
+      allow(StorageService::Client).to receive(:upload).and_return(
+        storage_key: "dev/admin/thumbnail_replacement.svg",
+        url: "https://assets.example.com/thumbnail-replacement.svg",
+        bytes: 512,
+        format: "svg"
+      )
+
+      post "/v1/admin/assets/#{video_asset.id}/thumbnail/upload",
+           params: { file: svg_file },
+           headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(video_asset.reload.thumbnail).to have_attributes(extension: "svg", status: "pending")
+      expect(StorageService::Client).to have_received(:upload).with(
+        anything,
+        hash_including(resource_type: "image", storage_key: a_string_matching(/\.svg$/))
+      )
+      expect(Media::ConvertImageJob).to have_received(:perform_later).with(asset_id: video_asset.reload.thumbnail.id)
+    end
+
+    it "replaces an existing audio thumbnail with SVG using the same record" do
+      audio_asset = create(:asset, type: "general", format: "audio", extension: "amr")
+      previous = create(
+        :asset,
+        type: "thumbnail",
+        format: "image",
+        extension: "webp",
+        parent_asset: audio_asset,
+        storage_key: "dev/admin/audio_thumbnail_previous.webp"
+      )
+      svg_file = fixture_file_upload("icon.svg", "image/svg+xml")
+      allow(StorageService::Client).to receive(:upload).and_return(
+        storage_key: "dev/admin/audio_thumbnail_replacement.svg",
+        url: "https://assets.example.com/audio-thumbnail-replacement.svg",
+        bytes: 512,
+        format: "svg"
+      )
+
+      post "/v1/admin/assets/#{audio_asset.id}/thumbnail/upload",
+           params: { file: svg_file },
+           headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(audio_asset.reload.thumbnail).to have_attributes(
+        id: previous.id,
+        extension: "svg",
+        status: "pending",
+        storage_key: "dev/admin/audio_thumbnail_replacement.svg"
+      )
+      expect(StorageService::Client).to have_received(:delete).with(
+        "dev/admin/audio_thumbnail_previous.webp",
+        resource_type: "image"
+      )
+      expect(Media::ConvertImageJob).to have_received(:perform_later).with(asset_id: previous.id)
+    end
+  end
+
+  describe "POST /v1/admin/assets/:id/subtitle/upload" do
+    let(:video_asset) { create(:asset, format: "video", extension: "mp4") }
+    let(:srt_file) { fixture_file_upload("captions.srt", "application/x-subrip") }
+
+    before do
+      allow(StorageService::Client).to receive(:upload).and_return(
+        storage_key: "dev/admin/subtitle_replacement.srt",
+        url: "https://assets.example.com/subtitle-replacement.srt",
+        bytes: 128,
+        format: "srt"
+      )
+      allow(StorageService::Client).to receive(:delete).and_return(true)
+      allow(StorageService::Client).to receive(:url) { |key, *_| "https://assets.example.com/#{key}" }
+      allow(Media::CompressMediaJob).to receive(:perform_later)
+    end
+
+    it "attaches an srt subtitle to a video parent without enqueueing compression" do
+      post "/v1/admin/assets/#{video_asset.id}/subtitle/upload",
+           params: { file: srt_file },
+           headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_status["success"]).to be(true)
+      expect(video_asset.reload.subtitles.first).to have_attributes(
+        type: "subtitle",
+        format: "subtitle",
+        extension: "srt",
+        status: "ready",
+        storage_key: "dev/admin/subtitle_replacement.srt"
+      )
+      expect(response_data.dig("attributes", "children", "subtitles", 0, "url")).to include("dev/admin/subtitle_replacement.srt")
+      expect(response_data.dig("attributes", "children", "subtitles", 0, "status")).to eq("ready")
+      expect(StorageService::Client).to have_received(:upload).with(
+        anything,
+        hash_including(resource_type: "raw")
+      )
+      expect(Media::CompressMediaJob).not_to have_received(:perform_later)
+    end
+
+    it "adds another subtitle without replacing existing subtitle children" do
+      previous = create(
+        :asset,
+        type: "subtitle",
+        format: "subtitle",
+        extension: "srt",
+        parent_asset: video_asset,
+        storage_key: "dev/admin/subtitle_previous.srt"
+      )
+
+      post "/v1/admin/assets/#{video_asset.id}/subtitle/upload",
+           params: { file: srt_file },
+           headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_status["success"]).to be(true)
+      expect(Asset.exists?(previous.id)).to be(true)
+      expect(video_asset.reload.subtitles.pluck(:storage_key)).to contain_exactly(
+        "dev/admin/subtitle_previous.srt",
+        "dev/admin/subtitle_replacement.srt"
+      )
+      expect(response_data.dig("attributes", "children", "subtitles").pluck("url")).to include(
+        a_string_including("dev/admin/subtitle_replacement.srt")
+      )
+      expect(response_data.dig("attributes", "children", "subtitles").size).to eq(2)
+      expect(StorageService::Client).not_to have_received(:delete).with(
+        "dev/admin/subtitle_previous.srt",
+        resource_type: "raw"
+      )
+    end
+
+    it "rejects a non-srt replacement" do
+      image = fixture_file_upload("avatar.png", "image/png")
+
+      post "/v1/admin/assets/#{video_asset.id}/subtitle/upload",
+           params: { file: image },
+           headers: headers
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response_status["success"]).to be(false)
+      expect(StorageService::Client).not_to have_received(:upload)
+    end
+
+    it "attaches a subtitle to a type=audio parent" do
+      audio_asset = create(:asset, type: "general", format: "audio", extension: "wav")
+
+      post "/v1/admin/assets/#{audio_asset.id}/subtitle/upload",
+           params: { file: srt_file },
+           headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(response_status["success"]).to be(true)
+      expect(audio_asset.reload.subtitles.first.storage_key).to eq("dev/admin/subtitle_replacement.srt")
+      expect(response_data.dig("attributes", "children", "subtitles", 0, "url")).to include("dev/admin/subtitle_replacement.srt")
+    end
+
+    it "rejects a non-audio, non-video parent" do
+      image_asset = create(:asset, format: "image", extension: "png")
+      pdf_asset = create(:asset, type: "general", format: "doc", extension: "pdf")
+
+      post "/v1/admin/assets/#{image_asset.id}/subtitle/upload",
+           params: { file: srt_file },
+           headers: headers
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response_status["success"]).to be(false)
+      expect(StorageService::Client).not_to have_received(:upload)
+
+      post "/v1/admin/assets/#{pdf_asset.id}/subtitle/upload",
+           params: { file: srt_file },
+           headers: headers
+
+      expect(response).to have_http_status(:unprocessable_content)
       expect(StorageService::Client).not_to have_received(:upload)
     end
   end
@@ -339,7 +690,7 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       get "/v1/admin/assets/storage_stats", headers: headers
 
       expect(response).to have_http_status(:ok)
-      stats = response_data.dig("stats")
+      stats = response_data
       expect(stats["provider"]).to eq("garage")
       expect(stats["bucket"]).to eq("rexone")
       expect(stats["bucket_bytes"]).to eq(5000)
@@ -371,7 +722,7 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       get "/v1/admin/assets/storage_stats", headers: headers
 
       expect(response).to have_http_status(:ok)
-      stats = response_data.dig("stats")
+      stats = response_data
       expect(stats["db_assets_count"]).to eq(2)
       expect(stats["db_assets_bytes"]).to eq(6000)
     end
@@ -385,38 +736,73 @@ RSpec.describe "V1 Admin Assets API", type: :request do
   end
 
   describe "PATCH /v1/admin/assets/:id" do
-    it "updates asset attributes" do
-      asset = create(:asset, name: "Old Name")
+    it "updates asset attributes without modifying storage key or file name" do
+      asset = create(:asset, name: "dev/admin/avatar_test.png", storage_key: "dev/admin/avatar_test.png")
 
-      patch "/v1/admin/assets/#{asset.id}", params: { asset: { name: "Updated Name" } }, headers: headers
+      patch "/v1/admin/assets/#{asset.id}",
+            params: { asset: { title: "Updated Title", description: "Updated Desc" } },
+            headers: headers
 
       expect(response).to have_http_status(:ok)
-      expect(asset.reload.name).to eq("Updated Name")
+      expect(asset.reload.title).to eq("Updated Title")
+      expect(asset.description).to eq("Updated Desc")
+      expect(asset.name).to eq("dev/admin/avatar_test.png")
+      expect(asset.storage_key).to eq("dev/admin/avatar_test.png")
     end
 
-    it "renames storage key and name when asset type changes" do
+    it "preserves storage key and file name when type is not changed even if name param is sent" do
       asset = create(:asset,
-        name: "admin/avatar_company_1788500000.png",
-        storage_key: "admin/avatar_company_1788500000.png",
+        name: "dev/admin/avatar_company_1788500000.png",
+        storage_key: "dev/admin/avatar_company_1788500000.png",
         type: "avatar",
         source: AssetConstants::AssetSource::UPLOAD
       )
       allow(StorageService::Client).to receive(:move)
-      allow(StorageService::Client).to receive(:url).and_return("http://localhost:3100/rexone/admin/thumbnail_company_1788500000.png")
+
+      patch "/v1/admin/assets/#{asset.id}",
+            params: {
+              asset: {
+                name: "dev/user/123/avatar_renamed.png",
+                title: "New Display Name",
+                description: "New description",
+                type: "avatar"
+              }
+            },
+            headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(StorageService::Client).not_to have_received(:move)
+      expect(asset.reload.name).to eq("dev/admin/avatar_company_1788500000.png")
+      expect(asset.storage_key).to eq("dev/admin/avatar_company_1788500000.png")
+      expect(asset.title).to eq("New Display Name")
+      expect(asset.description).to eq("New description")
+      expect(response_data.dig("attributes", "title")).to eq("New Display Name")
+      expect(response_data.dig("attributes", "description")).to eq("New description")
+    end
+
+    it "renames storage key and name preserving directory path when asset type changes" do
+      asset = create(:asset,
+        name: "dev/admin/avatar_company_1788500000.png",
+        storage_key: "dev/admin/avatar_company_1788500000.png",
+        type: "avatar",
+        source: AssetConstants::AssetSource::UPLOAD
+      )
+      allow(StorageService::Client).to receive(:move)
+      allow(StorageService::Client).to receive(:url).and_return("http://localhost:3100/rexone/dev/admin/thumbnail_company_1788500000.png")
 
       patch "/v1/admin/assets/#{asset.id}", params: { asset: { type: "thumbnail" } }, headers: headers
 
       expect(response).to have_http_status(:ok)
       expect(StorageService::Client).to have_received(:move).with(
-        "admin/avatar_company_1788500000.png",
-        "admin/thumbnail_company_1788500000.png"
+        "dev/admin/avatar_company_1788500000.png",
+        "dev/admin/thumbnail_company_1788500000.png"
       )
       expect(asset.reload.type).to eq("thumbnail")
-      expect(asset.storage_key).to eq("admin/thumbnail_company_1788500000.png")
-      expect(asset.name).to eq("admin/thumbnail_company_1788500000.png")
+      expect(asset.storage_key).to eq("dev/admin/thumbnail_company_1788500000.png")
+      expect(asset.name).to eq("dev/admin/thumbnail_company_1788500000.png")
     end
 
-    it "renames name and storage key even when form submits stale old name" do
+    it "renames name and storage key strictly preserving path even when form submits stale old name" do
       asset = create(:asset,
         name: "admin/general_sayadaw-kelasa_1788540008.png",
         storage_key: "admin/general_sayadaw-kelasa_1788540008.png",
@@ -424,13 +810,13 @@ RSpec.describe "V1 Admin Assets API", type: :request do
         source: AssetConstants::AssetSource::UPLOAD
       )
       allow(StorageService::Client).to receive(:move)
-      allow(StorageService::Client).to receive(:url).and_return("http://localhost:3100/rexone/admin/video_sayadaw-kelasa_1788540008.png")
+      allow(StorageService::Client).to receive(:url).and_return("http://localhost:3100/rexone/admin/attachment_sayadaw-kelasa_1788540008.png")
 
       patch "/v1/admin/assets/#{asset.id}",
             params: {
               asset: {
                 name: "admin/general_sayadaw-kelasa_1788540008.png",
-                type: "video"
+                type: "attachment"
               }
             },
             headers: headers
@@ -438,11 +824,31 @@ RSpec.describe "V1 Admin Assets API", type: :request do
       expect(response).to have_http_status(:ok)
       expect(StorageService::Client).to have_received(:move).with(
         "admin/general_sayadaw-kelasa_1788540008.png",
-        "admin/video_sayadaw-kelasa_1788540008.png"
+        "admin/attachment_sayadaw-kelasa_1788540008.png"
       )
-      expect(asset.reload.type).to eq("video")
-      expect(asset.storage_key).to eq("admin/video_sayadaw-kelasa_1788540008.png")
-      expect(asset.name).to eq("admin/video_sayadaw-kelasa_1788540008.png")
+      expect(asset.reload.type).to eq("attachment")
+      expect(asset.storage_key).to eq("admin/attachment_sayadaw-kelasa_1788540008.png")
+      expect(asset.name).to eq("admin/attachment_sayadaw-kelasa_1788540008.png")
+    end
+
+    it "rejects changing the type of a child asset" do
+      parent = create(:asset, type: "general", format: "video", extension: "mp4", url: "https://example.com/parent_video.mp4")
+      child = create(
+        :asset,
+        name: "dev/admin/thumbnail_child_123.webp",
+        storage_key: "dev/admin/thumbnail_child_123.webp",
+        type: "thumbnail",
+        format: "image",
+        extension: "webp",
+        parent_asset: parent,
+        url: "https://example.com/parent_thumb_3.webp"
+      )
+
+      patch "/v1/admin/assets/#{child.id}", params: { asset: { type: "general" } }, headers: headers
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response_status["error"]).to eq("Child asset type cannot be changed")
+      expect(child.reload.type).to eq("thumbnail")
     end
   end
 

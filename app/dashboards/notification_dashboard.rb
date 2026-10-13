@@ -11,8 +11,10 @@ class NotificationDashboard < Administrate::BaseDashboard
     id: Field::String,
     admin: Field::Boolean,
     category: Field::String,
+    clients: Field::String,
     created_by_id: Field::String,
     creator: Field::BelongsTo,
+    cta_text: Field::String,
     description: Field::Text,
     discarded_at: Field::DateTime,
     discarded_by_id: Field::String,
@@ -25,6 +27,7 @@ class NotificationDashboard < Administrate::BaseDashboard
     in_app_data: Field::String.with_options(searchable: false),
     in_app_title: Field::String,
     link: Field::String,
+    metadata: Field::String.with_options(searchable: false),
     name: Field::String,
     push_body: Field::Text,
     push_template_id: Field::String,
@@ -48,6 +51,7 @@ class NotificationDashboard < Administrate::BaseDashboard
   # Feel free to add, remove, or rearrange items.
   COLLECTION_ATTRIBUTES = %i[
     category
+    clients
     event
     name
     admin
@@ -59,6 +63,7 @@ class NotificationDashboard < Administrate::BaseDashboard
     id
     admin
     category
+    clients
     created_by_id
     creator
     description
@@ -73,6 +78,8 @@ class NotificationDashboard < Administrate::BaseDashboard
     in_app_data
     in_app_title
     link
+    cta_text
+    metadata
     name
     push_body
     push_template_id
@@ -95,6 +102,7 @@ class NotificationDashboard < Administrate::BaseDashboard
   FORM_ATTRIBUTES = %i[
     admin
     category
+    clients
     created_by_id
     creator
     description
@@ -109,6 +117,8 @@ class NotificationDashboard < Administrate::BaseDashboard
     in_app_data
     in_app_title
     link
+    cta_text
+    metadata
     name
     push_body
     push_template_id

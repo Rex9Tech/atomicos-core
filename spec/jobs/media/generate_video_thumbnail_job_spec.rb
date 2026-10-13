@@ -18,8 +18,6 @@ RSpec.describe Media::GenerateVideoThumbnailJob, type: :job do
       bytes: 512,
       format: MediaConstants::IMAGE_EXT_WEBP
     )
-    allow(SocketService::Client).to receive(:broadcast)
-
     expect do
       described_class.perform_now(asset_id: video.id)
     end.to change(Asset, :count).by(1)
@@ -32,14 +30,17 @@ RSpec.describe Media::GenerateVideoThumbnailJob, type: :job do
       size_bytes: 512,
       assetable: video.assetable
     )
-    expect(SocketService::Client).to have_received(:broadcast).with(
-      user_id: creator.id,
+    notification = creator.user_notifications.find_by!(operation_type: NotificationConstants::OperationType::VIDEO_THUMBNAIL)
+    expect(notification).to have_attributes(
       message: I18n.t("admin.asset.thumbnail_generated", name: video.name),
-      data: hash_including(
-        type: MediaConstants::SocketEvent::ASSET_THUMBNAIL_GENERATED,
-        asset_id: video.id
-      )
+      operation_status: NotificationConstants::OperationStatus::COMPLETED,
+      link: "/admin/assets/#{video.id}"
     )
+    expect(notification.metadata).to include(
+      "type" => MediaConstants::SocketEvent::ASSET_THUMBNAIL_GENERATED,
+      "asset_id" => video.id
+    )
+    expect(video.reload.status).to eq(MediaConstants::Status::READY)
   end
 
   it "does not create another thumbnail when one already exists" do
@@ -49,5 +50,16 @@ RSpec.describe Media::GenerateVideoThumbnailJob, type: :job do
     expect do
       described_class.perform_now(asset_id: video.id)
     end.not_to change(Asset, :count)
+  end
+
+  it "uses the shared per-asset media-processing concurrency key" do
+    video = create(:asset, format: AssetConstants::AssetFormat::VIDEO, extension: "mp4")
+
+    expect(described_class.concurrency_key.call(asset_id: video.id)).to eq(
+      MediaConstants::Processing.concurrency_key(video.id)
+    )
+    expect(Media::CompressMediaJob.concurrency_key.call(asset_id: video.id)).to eq(
+      MediaConstants::Processing.concurrency_key(video.id)
+    )
   end
 end

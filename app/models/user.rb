@@ -4,8 +4,10 @@ class User < ApplicationRecord
   include Devise::JWT::RevocationStrategies::JTIMatcher
   has_many :assets, as: :assetable, dependent: :nullify
   has_many :subscriptions, class_name: "Payment::Subscription", dependent: :destroy
-  has_many :transactions, class_name: "Payment::Transaction", dependent: :destroy
+  has_many :purchases, class_name: "Payment::Purchase", dependent: :destroy
   has_many :accesses, dependent: :destroy
+  has_many :user_coupons, class_name: "Payment::UserCoupon", dependent: :nullify
+  has_many :referred_coupons, class_name: "Payment::Coupon", foreign_key: :referrer_id, dependent: :destroy
   has_many :rooms, class_name: "Chat::Room", dependent: :destroy
   has_many :atoms, dependent: :destroy
   has_many :recordings, dependent: :destroy
@@ -28,7 +30,8 @@ class User < ApplicationRecord
 
   before_create :generate_confirmation_code
   after_create :assign_default_user_role, if: -> { roles.empty? }
-  after_create :ensure_default_category
+  after_create :create_default_referral_coupon
+  after_destroy :cleanup_stripe_customer, if: -> { stripe_customer_id.present? }
 
   self.primary_key = "id"
 
@@ -51,8 +54,8 @@ class User < ApplicationRecord
   end
 
   def send_confirmation_instructions
-    generate_confirmation_code if confirmation_code.blank?
-    save(validate: false) if changed?
+    generate_confirmation_code
+    save(validate: false)
     NotificationService::Center.confirmation_email(
       email: email,
       code: confirmation_code
@@ -67,6 +70,7 @@ class User < ApplicationRecord
     elsif confirmation_code == code &&
       confirmation_sent_at.present? &&
       confirmation_sent_at > AppConfig::CONFIRM_CODE_WITHIN.ago
+      self.confirmation_code = nil
       confirm
     else
       errors.add(:confirmation_code, :invalid_or_expired)
@@ -74,12 +78,20 @@ class User < ApplicationRecord
     end
   end
 
+  def active_for_authentication?
+    super && !discarded?
+  end
+
+  def inactive_message # used for spec
+    discarded? ? :inactive : super
+  end
+
   def get_avatar_url
     assets.find_by(type: AssetConstants::AssetType::AVATAR)&.url
   end
 
   def stripe_customer
-    result = PaymentService::Client.create_customer(user: self)
+    result = Payment::Providers::Client.create_customer(user: self)
     result[:customer_id]
   end
 
@@ -160,13 +172,38 @@ class User < ApplicationRecord
     end
   end
 
-  # Every user starts with a "General" molecule so the workspace is never
-  # empty on first sign-in. Best-effort: a failure must not break signup.
-  def ensure_default_category
-    return if categories.exists?
+  def create_default_referral_coupon
+    candidate_code = loop do
+      code = "REF#{SecureRandom.alphanumeric(6).upcase}"
+      break code unless Payment::Coupon.exists?(code: code)
+    end
 
-    categories.create!(name: "General")
-  rescue StandardError => e
-    Rails.logger.warn("[USER] default category failed for #{id}: #{e.message}")
+    Payment::Coupon.create!(
+      title: "#{name}'s Referral Code",
+      description: "Personal referral coupon for #{name}",
+      code: candidate_code,
+      coupon_type: :percentage,
+      amount: 10,
+      currency: nil,
+      max_usage: 0,
+      max_usage_per_user: 1,
+      referrer_id: id,
+      active: true
+    )
+  rescue => e
+    Rails.logger.warn("[User] Referral coupon creation skipped: #{e.message}")
+  end
+
+  def cleanup_stripe_customer
+    return if stripe_customer_id.blank?
+
+    begin
+      Stripe::Customer.delete(stripe_customer_id)
+      Rails.logger.info("[User] Deleted Stripe customer: #{stripe_customer_id}")
+    rescue Stripe::InvalidRequestError => e
+      Rails.logger.info("[User] Stripe customer #{stripe_customer_id} not found or already deleted: #{e.message}")
+    rescue => e
+      Rails.logger.warn("[User] Could not delete Stripe customer #{stripe_customer_id}: #{e.message}")
+    end
   end
 end

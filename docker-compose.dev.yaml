@@ -1,6 +1,13 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-3}"
+
 services:
   api:
     container_name: ${RAILS_CONTAINER_NAME}
+    image: ${RAILS_CONTAINER_NAME}
     build:
       context: .
       dockerfile: ${RAILS_DOCKERFILE}
@@ -15,12 +22,11 @@ services:
         condition: service_healthy
     # Run server only
     command: ["./bin/rails", "server", "-b", "0.0.0.0"]
+    logging: *default-logging
 
   waka:
     container_name: ${WAKA_CONTAINER_NAME}
-    build:
-      context: .
-      dockerfile: ${RAILS_DOCKERFILE}
+    image: ${RAILS_CONTAINER_NAME}
     env_file:
       - .env
     volumes:
@@ -28,7 +34,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      api:
+        condition: service_started
     command: ["./bin/jobs"]
+    logging: *default-logging
 
   db:
     container_name: ${DB_CONTAINER_NAME}
@@ -42,15 +51,14 @@ services:
       retries: 10
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD}
+    logging: *default-logging
     # ports: # enable to access from outside of docker
     #   - ${PG_PORT_MAP}
 
   # Media Worker [OPTIONAL] - processes :media queue only
   media:
     container_name: ${MEDIA_CONTAINER_NAME}
-    build:
-      context: .
-      dockerfile: ${RAILS_DOCKERFILE}
+    image: ${RAILS_CONTAINER_NAME}
     env_file:
       - .env
     volumes:
@@ -58,7 +66,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      api:
+        condition: service_started
     command: ["./bin/jobs", "-c", "config/queue.media.yml"]
+    logging: *default-logging
 
   # Garage S3 Storage [OPTIONAL] - self-hosted S3-compatible object storage
   garage:
@@ -70,7 +81,8 @@ services:
       - garage-data:/var/lib/garage/data
     ports:
       - "${S3_PORT_MAP:-3100:3100}"
-      - "${S3_ADMIN_PORT_MAP:-3101:3101}"
+      - "${S3_ADMIN_PORT_MAP:-127.0.0.1:3101:3101}"
+    logging: *default-logging
 
 volumes:
   postgres:

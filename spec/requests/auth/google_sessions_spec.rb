@@ -6,15 +6,7 @@ RSpec.describe "Google authentication", type: :request do
     allow(NotificationService::Center).to receive(:welcome)
     allow(CacheService).to receive(:write)
     allow(CacheService).to receive(:delete)
-    allow(StorageService::Client).to receive(:upload) do |_file, options|
-      {
-        storage_key: "avatar/#{options[:storage_key]}",
-        url: "https://cdn.example.com/#{options[:storage_key]}.jpg",
-        bytes: 1234,
-        format: "jpg",
-        resource_type: "image"
-      }
-    end
+    allow(Media::ImportRemoteImageJob).to receive(:perform_later)
   end
 
   describe "POST /signin/google" do
@@ -24,11 +16,12 @@ RSpec.describe "Google authentication", type: :request do
 
       post "/signin/google", params: { token: "google-token" }
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("user", "id")).to eq(user.id)
+      expect(response_data["id"]).to eq(user.id)
+      expect(response_meta["token"]).to be_present
       expect(NotificationService::Center).to have_received(:sign_in_alert)
     end
 
-    it "uploads a Google avatar when the existing account only has a Google image URL" do
+    it "queues a Google avatar import when the existing account only has an unstored image URL" do
       user = create(:user, :google_provider, email: "google@example.com")
       create(
         :asset,
@@ -44,13 +37,10 @@ RSpec.describe "Google authentication", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(user.reload.get_avatar_url).to eq("https://example.com/avatar.jpg")
-      expect(StorageService::Client).to have_received(:upload).with(
-        "https://example.com/avatar.jpg",
-        hash_including(
-          storage_key: a_string_starting_with("user/#{user.id}/avatar_google_"),
-          folder: "user_uploads/#{AssetConstants::AssetType::AVATAR}",
-          resource_type: AssetConstants::AssetFormat::IMAGE
-        )
+      expect(Media::ImportRemoteImageJob).to have_received(:perform_later).with(
+        asset_id: user.assets.find_by!(type: AssetConstants::AssetType::AVATAR).id,
+        source_url: "https://example.com/avatar.jpg",
+        storage_key: a_string_starting_with("user/#{user.id}/avatar_google_")
       )
     end
 
@@ -73,7 +63,7 @@ RSpec.describe "Google authentication", type: :request do
 
       post "/signin/google", params: { token: "google-token" }
       expect(response).to have_http_status(:ok)
-      expect(response_data).to include("password_required" => true, "challenge_token" => "challenge-token")
+      expect(response_meta).to include("password_required" => true, "challenge_token" => "challenge-token")
       expect(CacheService).to have_received(:write).with(
         "google_signin:challenge:challenge-token",
         include('"email":"new.google@example.com"'),
@@ -130,17 +120,15 @@ RSpec.describe "Google authentication", type: :request do
         name: a_string_starting_with("user/#{user.id}/avatar_google_"),
         url: "https://example.com/avatar.jpg",
         format: AssetConstants::AssetFormat::IMAGE,
-        source: AssetConstants::AssetSource::GOOGLE
+        source: AssetConstants::AssetSource::GOOGLE,
+        status: MediaConstants::Status::PENDING
       )
-      expect(StorageService::Client).to have_received(:upload).with(
-        "https://example.com/avatar.jpg",
-        hash_including(
-          storage_key: a_string_starting_with("user/#{user.id}/avatar_google_"),
-          folder: "user_uploads/#{AssetConstants::AssetType::AVATAR}",
-          resource_type: AssetConstants::AssetFormat::IMAGE
-        )
+      expect(Media::ImportRemoteImageJob).to have_received(:perform_later).with(
+        asset_id: user.assets.find_by!(type: AssetConstants::AssetType::AVATAR).id,
+        source_url: "https://example.com/avatar.jpg",
+        storage_key: a_string_starting_with("user/#{user.id}/avatar_google_")
       )
-      expect(NotificationService::Center).to have_received(:welcome).with(user_id: user.id, name: user.name)
+      expect(NotificationService::Center).to have_received(:welcome).with(user)
       expect(CacheService).to have_received(:delete).with("google_signin:challenge:challenge")
     end
 
@@ -166,9 +154,9 @@ RSpec.describe "Google authentication", type: :request do
       expect(response).to have_http_status(:ok)
       expect(user.reload).to be_confirmed
       expect(user.provider).to eq("google")
-      expect(response_data.dig("user", "id")).to eq(user.id)
-      expect(response_data["token"]).to be_present
-      expect(NotificationService::Center).to have_received(:welcome).with(user_id: user.id, name: "New Google User")
+      expect(response_data["id"]).to eq(user.id)
+      expect(response_meta["token"]).to be_present
+      expect(NotificationService::Center).to have_received(:welcome).with(user)
       expect(CacheService).to have_received(:delete).with("google_signin:challenge:challenge")
     end
 
@@ -192,8 +180,8 @@ RSpec.describe "Google authentication", type: :request do
       end.to change(User, :count).by(1)
 
       expect(response).to have_http_status(:ok)
-      expect(response_data.dig("user", "id")).to eq(user.id)
-      expect(response_data["token"]).to be_present
+      expect(response_data["id"]).to eq(user.id)
+      expect(response_meta["token"]).to be_present
       expect(NotificationService::Center).not_to have_received(:welcome)
     end
 

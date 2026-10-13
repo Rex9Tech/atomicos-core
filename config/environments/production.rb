@@ -35,17 +35,25 @@ Rails.application.configure do
   # Mount Action Cable outside main process or domain.
   # config.action_cable.mount_path = nil
   # config.action_cable.url = "wss://example.com/cable"
-  # Action Cable allowed origins in production
-  config.action_cable.allowed_request_origins = [
-    ENV["RAILS_CLIENT_BASE_URL"],
-    %r{\Ahttps?://([a-zA-Z0-9-]+\.)?rexone\.me\z},
-    %r{\Ahttp://localhost:\d+\z},
-    %r{\Ahttp://127\.0\.0\.1:\d+\z}
-  ].compact
+  # Action Cable allowed origins in production (Secure: NO localhost in production by default)
+  cable_origins = []
 
-  # Native mobile clients (Flutter) send no Origin header; the JWT token in
-  # ?token= authenticates them, so CSRF origin checks must be disabled.
-  config.action_cable.disable_request_forgery_protection = true
+  if AppConfig::PRODUCT_DOMAIN.present?
+    p_domain = AppConfig::PRODUCT_DOMAIN
+    cable_origins << %r{\Ahttps?://([a-zA-Z0-9-]+\.)*#{Regexp.escape(p_domain)}(:\d+)?\z}
+  end
+
+  cable_origins << AppConfig::CLIENT_BASE_URL if AppConfig::CLIENT_BASE_URL.present?
+  if AppConfig::CORS_ORIGINS.any?
+    cable_origins.concat(AppConfig::CORS_ORIGINS)
+  end
+
+  if AppConfig::CORS_ALLOW_LOCALHOST
+    cable_origins << %r{\Ahttp://localhost(:\d+)?\z}
+    cable_origins << %r{\Ahttp://127\.0\.0\.1(:\d+)?\z}
+  end
+
+  config.action_cable.allowed_request_origins = cable_origins.compact
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy (Traefik/Coolify).
   # Can be used together with config.force_ssl for Strict-Transport-Security and secure cookies.
@@ -130,14 +138,53 @@ Rails.application.configure do
   config.active_record.attributes_for_inspect = [ :id ]
 
   # Enable DNS rebinding protection and other `Host` header attacks.
-  config.hosts = [
-    /localhost:\d+/,   # Allow requests from localhost with any port
-    "rexone.me",     # Allow requests from rexone.me
-    /.+\.rexone\.me/, # Allow requests from subdomains like `www.rexone.me`
-    /.+\.onrender\.com/, # Allow Render demo/test deployments (e.g. atomicos-core.onrender.com)
-    /.+\.sslip\.io/, # Allow Coolify auto-assigned domains (e.g. xxx.187.53.137.72.sslip.io)
-    /.+\.khantsithu\.tech/ # Custom domains (e.g. atomicos-core.khantsithu.tech)
-  ]
+  allowed_hosts = []
+
+  if AppConfig::PRODUCT_DOMAIN.present?
+    p_domain = AppConfig::PRODUCT_DOMAIN
+    allowed_hosts << p_domain
+    allowed_hosts << /.+\.#{Regexp.escape(p_domain)}/
+  end
+
+  if AppConfig::SERVER_BASE_URL.present?
+    begin
+      server_host = URI.parse(AppConfig::SERVER_BASE_URL).host
+      allowed_hosts << server_host if server_host.present?
+    rescue URI::InvalidURIError
+    end
+  end
+
+  if AppConfig::CLIENT_BASE_URL.present?
+    begin
+      client_host = URI.parse(AppConfig::CLIENT_BASE_URL).host
+      allowed_hosts << client_host if client_host.present?
+    rescue URI::InvalidURIError
+    end
+  end
+
+  if AppConfig::RAILS_SERVER_HOST.present? && AppConfig::RAILS_SERVER_HOST != "localhost"
+    allowed_hosts << AppConfig::RAILS_SERVER_HOST
+  end
+
+  AppConfig::CORS_ORIGINS.each do |origin|
+    begin
+      origin_host = URI.parse(origin).host
+      allowed_hosts << origin_host if origin_host.present?
+    rescue URI::InvalidURIError
+    end
+  end
+
+  # Allow localhost in production only if explicitly opted in
+  if AppConfig::CORS_ALLOW_LOCALHOST
+    allowed_hosts << /localhost(:\d+)?/
+    allowed_hosts << /127\.0\.0\.1(:\d+)?/
+  end
+
+  if allowed_hosts.any?
+    config.hosts = allowed_hosts.uniq
+  else
+    config.hosts.clear
+  end
 
   # Additional hosts can be supplied without a code change:
   # APP_ALLOWED_HOSTS="api.example.com,other.example.com"
@@ -147,5 +194,5 @@ Rails.application.configure do
                        .reject(&:empty?)
 
   # Skip DNS rebinding protection for the default health check endpoint.
-  # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+  config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
 end

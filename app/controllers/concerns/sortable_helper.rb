@@ -2,8 +2,9 @@
 
 module SortableHelper
   def sort(scope, columns:, default_column: columns.first, default_direction: SortConstants::Order::DESC)
-    sort_by = params[:sort_by].to_s.presence
-    sort_order = params[:sort_order].to_s.downcase
+    sort_params = params.permit(:sort_by, :sort_order)
+    sort_by = (sort_params[:sort_by].presence).to_s.presence
+    sort_order = (sort_params[:sort_order].presence).to_s.downcase
     direction = sort_order == SortConstants::Order::ASC ? :asc : :desc
 
     if sort_by.present? && columns.map(&:to_s).include?(sort_by)
@@ -13,20 +14,28 @@ module SortableHelper
           User.arel_table[:name].public_send(direction),
           User.arel_table[:username].public_send(direction)
         )
+      when "user_email"
+        scope.left_joins(:user).order(
+          User.arel_table[:email].public_send(direction)
+        )
       when "product_name"
         scope.left_joins(:product).order(
           Payment::Product.arel_table[:name].public_send(direction)
+        )
+      when "coupon_code"
+        scope.left_joins(:coupon).order(
+          Payment::Coupon.arel_table[:code].public_send(direction)
         )
       when "message_count"
         scope.left_joins(:messages)
              .group(scope.klass.arel_table[:id])
              .order(Chat::Message.arel_table[:id].count.public_send(direction))
       else
-        scope.order(sort_by.to_sym => direction)
+        scope.order(scope.klass.arel_table[sort_by.to_sym].public_send(direction))
       end
     else
       fallback_dir = default_direction.to_s == SortConstants::Order::ASC ? :asc : :desc
-      scope.order(default_column.to_sym => fallback_dir)
+      scope.order(scope.klass.arel_table[default_column.to_sym].public_send(fallback_dir))
     end
   end
 end

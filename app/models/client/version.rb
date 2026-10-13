@@ -18,13 +18,13 @@ class Client::Version < ApplicationRecord
 
   validates :number, presence: true,
             format: { with: VersionConstants::Number::FORMAT },
-            uniqueness: { conditions: -> { kept } }
+            uniqueness: true
   validates :title, presence: true
   validates :status, presence: true, inclusion: { in: VersionConstants::Status::ALL }
   validates :ios_build_number, numericality: { only_integer: true, greater_than: 0 },
-            uniqueness: { conditions: -> { kept } }, allow_nil: true
+            uniqueness: true, allow_nil: true
   validates :android_build_number, numericality: { only_integer: true, greater_than: 0 },
-            uniqueness: { conditions: -> { kept } }, allow_nil: true
+            uniqueness: true, allow_nil: true
 
   scope :live, -> {
     where(status: VersionConstants::Status::PUBLISHED)
@@ -34,7 +34,8 @@ class Client::Version < ApplicationRecord
   def self.lookup_by_number(number)
     return if number.blank?
 
-    find_by(number: number)
+    cleaned = number.to_s.split("+").first.strip
+    find_by(number: cleaned) || find_by(number: number.to_s.strip)
   end
 
   before_save :yank_other_published_versions, if: :publishing?

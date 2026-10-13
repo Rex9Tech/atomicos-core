@@ -52,9 +52,5 @@ module SpeechConstants
     AZURE_USER_AGENT = "rexone-core".freeze
     HEADER_OUTPUT_FORMAT = "X-Microsoft-OutputFormat".freeze
     HEADER_USER_AGENT = "User-Agent".freeze
-
-    STORAGE_FOLDER = "speech/tts".freeze
-    # Cloudinary treats audio like video for upload/delete (matches Asset#storage_resource_type).
-    STORAGE_RESOURCE_TYPE = "video".freeze
   end
 end

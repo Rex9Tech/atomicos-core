@@ -7,6 +7,12 @@ class Payment::Subscription < ApplicationRecord
   # ===== ASSOCIATIONS =====
   belongs_to :user
   belongs_to :product, class_name: "Payment::Product", inverse_of: :subscriptions
+  has_one :user_coupon, -> { where(payment_type: :subscription) },
+          class_name: "Payment::UserCoupon",
+          foreign_key: :payment_id,
+          dependent: :nullify,
+          inverse_of: false
+  has_one :coupon, through: :user_coupon, class_name: "Payment::Coupon"
 
   # ===== ENUMS =====
   enum :status, {
@@ -20,22 +26,19 @@ class Payment::Subscription < ApplicationRecord
     paused: PaymentConstants::SubscriptionStatus::PAUSED
   }
 
-  enum :cycle, {
-    monthly: PaymentConstants::BillingCycle::MONTH,
-    yearly: PaymentConstants::BillingCycle::YEAR
-  }, prefix: true
-
-  enum :payment_method_type, {
-    card: PaymentConstants::PaymentMethodType::CARD,
-    google_pay: PaymentConstants::PaymentMethodType::GOOGLE_PAY,
-    apple_pay: PaymentConstants::PaymentMethodType::APPLE_PAY,
-    bank_transfer: PaymentConstants::PaymentMethodType::BANK_TRANSFER,
-    other: PaymentConstants::PaymentMethodType::OTHER
-  }, prefix: true
-
   # ===== VALIDATIONS =====
-  validates :stripe_subscription_id, presence: true, uniqueness: true
+  validates :provider, presence: true, inclusion: { in: PaymentConstants::Provider::ALL }
+  validates :provider_subscription_id, presence: true, uniqueness: true
+  validates :currency, :interval, :current_period_start, :current_period_end,
+            :started_at, presence: true
+  validates :provider_subscription_item_id, :provider_price_id, presence: true, if: :stripe?
   validates :status, presence: true
+  validates :unit_amount, numericality: { greater_than_or_equal_to: 0, only_integer: true }
+  validates :quantity, :interval_count, numericality: { greater_than: 0, only_integer: true }
+  validates :currency, format: { with: /\A[a-z]{3}\z/ }
+  validates :interval, inclusion: { in: PaymentConstants::BillingInterval::ALL }
+
+  after_destroy :cleanup_provider_subscription, if: -> { stripe? && provider_subscription_id.present? }
 
   # ===== SCOPES =====
   scope :active, -> { where(status: PaymentConstants::SubscriptionStatus::ACTIVE) }
@@ -44,10 +47,27 @@ class Payment::Subscription < ApplicationRecord
   scope :trialing, -> { where(status: PaymentConstants::SubscriptionStatus::TRIALING) }
   scope :paused, -> { where(status: PaymentConstants::SubscriptionStatus::PAUSED) }
   scope :expiring_soon, -> { active.where("current_period_end < ?", 7.days.from_now) }
+  scope :for_provider, ->(provider_name) { where(provider: provider_name) }
 
   # ===== INSTANCE METHODS =====
 
   # Status helpers
+  def stripe?
+    provider == PaymentConstants::Provider::STRIPE
+  end
+
+  def google_play?
+    provider == PaymentConstants::Provider::GOOGLE_PLAY
+  end
+
+  def app_store?
+    provider == PaymentConstants::Provider::APP_STORE
+  end
+
+  def in_app?
+    google_play? || app_store?
+  end
+
   def active?
     status == "active"
   end
@@ -127,5 +147,18 @@ class Payment::Subscription < ApplicationRecord
     return "Unknown" if payment_method_id.blank?
     brand = card_brand&.capitalize || payment_method_type&.capitalize || "Other"
     card_last4.present? ? "#{brand} ending in #{card_last4}" : brand
+  end
+
+  def cleanup_provider_subscription
+    return unless stripe? && provider_subscription_id.present?
+
+    begin
+      Stripe::Subscription.cancel(provider_subscription_id)
+      Rails.logger.info("[Subscription] Canceled Stripe subscription: #{provider_subscription_id}")
+    rescue Stripe::InvalidRequestError => e
+      Rails.logger.info("[Subscription] Stripe subscription #{provider_subscription_id} not found or already canceled: #{e.message}")
+    rescue => e
+      Rails.logger.warn("[Subscription] Could not cancel Stripe subscription #{provider_subscription_id}: #{e.message}")
+    end
   end
 end

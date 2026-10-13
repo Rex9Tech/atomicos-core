@@ -65,11 +65,11 @@ RSpec.describe Chat::Message, type: :model do
     message = create(:chat_message, role: "assistant", content: "Speak this")
     asset = create(
       :asset,
-      type: "audio",
+      type: "tts",
       format: "audio",
       source: "upload",
       url: "https://cdn.example.com/speech.mp3",
-      storage_key: "speech/tts/tts_message_#{message.id}",
+      storage_key: "dev/user/#{message.room.user_id}/tts/tts_message_#{message.id}_1789283588.mp3",
       assetable_type: "Chat::Message",
       assetable_id: message.id
     )

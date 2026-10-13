@@ -10,11 +10,11 @@ module IamConstants
 
     RESTRICTED_FOR_ADMIN = [
       "users",
-      "roles",
-      "permissions",
-      "user_roles",
-      "versions",
-      "user_versions"
+      "iam_roles",
+      "iam_permissions",
+      "iam_user_roles",
+      "client_versions",
+      "client_user_versions"
     ].freeze
   end
 
@@ -27,56 +27,78 @@ module IamConstants
   end
 
   module Resource
-    USERS         = "users".freeze
-    ROLES         = "roles".freeze
-    USER_ROLES    = "user_roles".freeze
-    PERMISSIONS   = "permissions".freeze
-    PRODUCTS      = "products".freeze
-    PAYMENTS      = "payments".freeze
-    SUBSCRIPTIONS = "subscriptions".freeze
-    TRANSACTIONS  = "transactions".freeze
-    ACCESSES      = "accesses".freeze
-    ASSETS        = "assets".freeze
-    NOTIFICATIONS = "notifications".freeze
-    AI            = "ai".freeze
-    SPEECH        = "speech".freeze
-    LOGS          = "logs".freeze
-    FEEDBACKS     = "feedbacks".freeze
-    ANALYTICS     = "analytics".freeze
-    VERSIONS      = "versions".freeze
-    USER_VERSIONS = "user_versions".freeze
-    ATOMS         = "atoms".freeze
-    RECORDINGS    = "recordings".freeze
-    EVENTS        = "events".freeze
-    CATEGORIES    = "categories".freeze
-    ALL           = [
-      USERS, ROLES, USER_ROLES, PERMISSIONS, PRODUCTS, PAYMENTS,
-      SUBSCRIPTIONS, TRANSACTIONS, ACCESSES, ASSETS, NOTIFICATIONS,
-      AI, SPEECH, LOGS, FEEDBACKS, ANALYTICS, VERSIONS, USER_VERSIONS,
-      ATOMS, RECORDINGS, EVENTS, CATEGORIES
+    # Top-level domain resources
+    USERS                 = "users".freeze
+    ACCESSES              = "accesses".freeze
+    ASSETS                = "assets".freeze
+    NOTIFICATIONS         = "notifications".freeze
+    FEEDBACKS             = "feedbacks".freeze
+    ANALYTICS             = "analytics".freeze
+    SPEECH                = "speech".freeze
+
+    # Module-namespaced resources
+    AI_PROFILES           = "ai_profiles".freeze
+    AI_RUNS               = "ai_runs".freeze
+    CHAT_ROOMS            = "chat_rooms".freeze
+    CHAT_MESSAGES         = "chat_messages".freeze
+    CLIENT_LOGS           = "client_logs".freeze
+    CLIENT_VERSIONS       = "client_versions".freeze
+    CLIENT_USER_VERSIONS  = "client_user_versions".freeze
+    IAM_ROLES             = "iam_roles".freeze
+    IAM_PERMISSIONS       = "iam_permissions".freeze
+    IAM_USER_ROLES        = "iam_user_roles".freeze
+    PAYMENT_PRODUCTS      = "payment_products".freeze
+    PAYMENT_PAYMENTS      = "payment_payments".freeze
+    PAYMENT_SUBSCRIPTIONS = "payment_subscriptions".freeze
+    PAYMENT_PURCHASES     = "payment_purchases".freeze
+    PAYMENT_COUPONS       = "payment_coupons".freeze
+    PAYMENT_USER_COUPONS  = "payment_user_coupons".freeze
+    USER_NOTIFICATIONS    = "user_notifications".freeze
+
+    ALL = [
+      USERS, ACCESSES, ASSETS, NOTIFICATIONS, USER_NOTIFICATIONS, FEEDBACKS, ANALYTICS, SPEECH,
+      AI_PROFILES, AI_RUNS, CHAT_ROOMS, CHAT_MESSAGES,
+      CLIENT_LOGS, CLIENT_VERSIONS, CLIENT_USER_VERSIONS,
+      IAM_ROLES, IAM_PERMISSIONS, IAM_USER_ROLES,
+      PAYMENT_PRODUCTS, PAYMENT_PAYMENTS, PAYMENT_SUBSCRIPTIONS, PAYMENT_PURCHASES,
+      PAYMENT_COUPONS, PAYMENT_USER_COUPONS
     ].freeze
+
+    # Compatibility aliases
+    ROLES         = IAM_ROLES
+    PERMISSIONS   = IAM_PERMISSIONS
+    USER_ROLES    = IAM_USER_ROLES
+    PRODUCTS      = PAYMENT_PRODUCTS
+    PAYMENTS      = PAYMENT_PAYMENTS
+    SUBSCRIPTIONS = PAYMENT_SUBSCRIPTIONS
+    PURCHASES     = PAYMENT_PURCHASES
+    COUPONS       = PAYMENT_COUPONS
+    USER_COUPONS  = PAYMENT_USER_COUPONS
+    LOGS          = CLIENT_LOGS
+    VERSIONS      = CLIENT_VERSIONS
+    USER_VERSIONS = CLIENT_USER_VERSIONS
   end
 
   module DefaultPermissions
     USER = [
-      { resource: Resource::LOGS, actions: [ Action::CREATE ] },
-      { resource: Resource::PRODUCTS, actions: [ Action::READ ] },
-      { resource: Resource::PAYMENTS, actions: [ Action::CREATE ] },
-      { resource: Resource::SUBSCRIPTIONS, actions: [ Action::READ, Action::CREATE ] },
-      { resource: Resource::TRANSACTIONS, actions: [ Action::READ ] },
+      { resource: Resource::CLIENT_LOGS, actions: [ Action::CREATE ] },
+      { resource: Resource::PAYMENT_PRODUCTS, actions: [ Action::READ ] },
+      { resource: Resource::PAYMENT_PAYMENTS, actions: [ Action::CREATE, Action::READ ] },
+      { resource: Resource::PAYMENT_SUBSCRIPTIONS, actions: [ Action::READ, Action::CREATE ] },
+      { resource: Resource::PAYMENT_PURCHASES, actions: [ Action::READ ] },
+      { resource: Resource::PAYMENT_COUPONS, actions: [ Action::READ ] },
+      { resource: Resource::PAYMENT_USER_COUPONS, actions: [ Action::READ ] },
       { resource: Resource::ACCESSES, actions: [ Action::READ ] },
       { resource: Resource::ASSETS, actions: Action::ALL },
       { resource: Resource::USERS, actions: Action::ALL },
-      { resource: Resource::AI, actions: Action::ALL },
+      { resource: Resource::CHAT_ROOMS, actions: Action::ALL },
+      { resource: Resource::CHAT_MESSAGES, actions: Action::ALL },
       { resource: Resource::SPEECH, actions: Action::ALL },
       { resource: Resource::FEEDBACKS, actions: [ Action::CREATE, Action::READ ] },
       { resource: Resource::NOTIFICATIONS, actions: [ Action::READ, Action::UPDATE, Action::DELETE ] },
-      { resource: Resource::VERSIONS, actions: [ Action::READ ] },
-      { resource: Resource::USER_VERSIONS, actions: [ Action::CREATE ] },
-      { resource: Resource::ATOMS, actions: Action::ALL },
-      { resource: Resource::RECORDINGS, actions: Action::ALL },
-      { resource: Resource::EVENTS, actions: Action::ALL },
-      { resource: Resource::CATEGORIES, actions: Action::ALL }
+      { resource: Resource::USER_NOTIFICATIONS, actions: [ Action::READ, Action::DELETE ] },
+      { resource: Resource::CLIENT_VERSIONS, actions: [ Action::READ ] },
+      { resource: Resource::CLIENT_USER_VERSIONS, actions: [ Action::CREATE ] }
     ].freeze
   end
 end

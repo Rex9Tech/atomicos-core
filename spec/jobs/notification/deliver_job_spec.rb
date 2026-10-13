@@ -5,10 +5,17 @@ RSpec.describe Notification::DeliverJob, type: :job do
     allow(SocketService::Client).to receive(:broadcast).and_return(true)
     allow(PushNotiService::Client).to receive(:send_to_user).and_return(true)
 
-    described_class.perform_now(channel: "socket", payload: { "user_id" => "1", "message" => "Hi" })
+    described_class.perform_now(
+      channel: "socket",
+      payload: { "user_id" => "1", "message" => "Hi", "clients" => %w[web mobile] }
+    )
     described_class.perform_now(channel: :push, payload: { "user_id" => "1", "title" => "Hi", "body" => "Body" })
 
-    expect(SocketService::Client).to have_received(:broadcast).with(user_id: "1", message: "Hi")
+    expect(SocketService::Client).to have_received(:broadcast).with(
+      user_id: "1",
+      message: "Hi",
+      clients: %w[web mobile]
+    )
     expect(PushNotiService::Client).to have_received(:send_to_user).with(user_id: "1", title: "Hi", body: "Body")
   end
 
@@ -34,5 +41,30 @@ RSpec.describe Notification::DeliverJob, type: :job do
     expect do
       described_class.perform_now(channel: :sms, payload: {})
     end.to raise_error(ArgumentError, "Unsupported notification channel: sms")
+  end
+
+  it "advances a tracked provider delivery from processing to completed" do
+    user = create(:user)
+    allow(PushNotiService::Client).to receive(:send_to_user).and_return(true)
+    allow(SocketService::Client).to receive(:broadcast).and_return(true)
+    operation = {
+      user_id: user.id,
+      operation_id: "notification_delivery:dispatch-id:push",
+      operation_type: NotificationConstants::OperationType::NOTIFICATION_DELIVERY,
+      title: "Delivery",
+      message: "Delivery status",
+      link: "/notifications",
+      data: { channel: NotificationConstants::Channel::PUSH }
+    }
+
+    described_class.perform_now(
+      channel: :push,
+      payload: { user_id: user.id, title: "Hi", body: "Body" },
+      operation: operation
+    )
+
+    notification = UserNotification.find_by!(operation_id: operation[:operation_id])
+    expect(notification.operation_status).to eq(NotificationConstants::OperationStatus::COMPLETED)
+    expect(notification.link).to eq("/notifications")
   end
 end

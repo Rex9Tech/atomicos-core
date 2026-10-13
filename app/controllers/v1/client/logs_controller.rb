@@ -21,7 +21,12 @@ class V1::Client::LogsController < V1::ApplicationController
     else
       # New log - assign attributes and save
       log_client.assign_attributes(log_client_params.except(:app_version))
-      log_client.version_id = Client::Version.lookup_by_number(log_client_params[:app_version])&.id
+      raw_version = log_client_params[:app_version].to_s.strip.presence
+      if raw_version
+        matched_version = Client::Version.lookup_by_number(raw_version)
+        log_client.version_id = matched_version&.id
+        log_client.context = (log_client.context || {}).merge("app_version" => raw_version)
+      end
       log_client.user = current_user if current_user.present?
       log_client.severity ||= "error"
       log_client.request_id ||= request.request_id
@@ -51,13 +56,11 @@ class V1::Client::LogsController < V1::ApplicationController
     logs = sort(logs, columns: SortConstants::Columns::CLIENT_LOG)
 
     pagy, records = pagy(logs)
-    serialized = Client::LogSerializer.paginated(records, pagy)
 
     render_json_response(
       status_code: 200,
       message: log_message(MessageService::Log::FETCHED),
-      data: serialized,
-      pagy: pagy
+      **Client::LogSerializer.collection_pagy(records, pagy)
     )
   end
 
@@ -66,7 +69,7 @@ class V1::Client::LogsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: log_message(MessageService::Log::FETCHED_ONE),
-      data: Client::LogSerializer.new(@log_client).serializable_hash[:data]
+      data: Client::LogSerializer.record(@log_client)
     )
   end
 
@@ -77,7 +80,7 @@ class V1::Client::LogsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: log_message(MessageService::Log::RESOLVED),
-      data: Client::LogSerializer.new(@log_client).serializable_hash[:data]
+      data: Client::LogSerializer.record(@log_client)
     )
   end
 
@@ -88,7 +91,7 @@ class V1::Client::LogsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: log_message(MessageService::Log::UNRESOLVED),
-      data: Client::LogSerializer.new(@log_client).serializable_hash[:data]
+      data: Client::LogSerializer.record(@log_client)
     )
   end
 
@@ -109,7 +112,7 @@ class V1::Client::LogsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: log_message(MessageService::Log::RESOLVED),
-      data: Client::LogSerializer.new(@log_client).serializable_hash[:data]
+      data: Client::LogSerializer.record(@log_client)
     )
   end
 
@@ -130,11 +133,11 @@ class V1::Client::LogsController < V1::ApplicationController
   end
 
   def set_log_client
-    @log_client = Client::Log.find(params[:id])
+    @log_client = Client::Log.find(params.permit(:id)[:id])
   end
 
   def set_log_client_including_discarded
-    @log_client = Client::Log.with_discarded.find(params[:id])
+    @log_client = Client::Log.with_discarded.find(params.permit(:id)[:id])
   end
 
   def log_client_params
@@ -151,33 +154,39 @@ class V1::Client::LogsController < V1::ApplicationController
   end
 
   def find_or_initialize_log
+    attrs = log_client_params
     conditions = {
-      message: params[:log][:message],
-      severity: params[:log][:severity] || "error",
-      platform: params[:log][:platform],
-      environment: params[:log][:environment],
-      os: params[:log][:os],
-      os_version: params[:log][:os_version],
-      browser: params[:log][:browser],
-      url: params[:log][:url],
-      method: params[:log][:method]
+      message: attrs[:message],
+      severity: attrs[:severity].presence || "error",
+      platform: attrs[:platform],
+      environment: attrs[:environment],
+      os: attrs[:os],
+      os_version: attrs[:os_version],
+      browser: attrs[:browser],
+      url: attrs[:url],
+      method: attrs[:method]
     }.compact
 
     Client::Log.find_or_initialize_by(conditions)
   end
 
+  def filter_params
+    params.permit(:discarded, :severity, :platform, :environment, :unresolved, :resolved, :storage_issues)
+  end
+
   def apply_filters(logs)
-    logs = if params[:discarded].to_s == "true"
+    filters = filter_params
+    logs = if filters[:discarded].to_s == "true"
       logs.with_discarded.discarded
     else
       logs.kept
     end
-    logs = logs.by_severity(params[:severity]) if params[:severity].present?
-    logs = logs.by_platform(params[:platform]) if params[:platform].present?
-    logs = logs.by_environment(params[:environment]) if params[:environment].present?
-    logs = logs.unresolved if params[:unresolved] == "true"
-    logs = logs.resolved if params[:resolved] == "true"
-    logs = logs.with_storage_issues if params[:storage_issues] == "true"
+    logs = logs.by_severity(filters[:severity]) if filters[:severity].present?
+    logs = logs.by_platform(filters[:platform]) if filters[:platform].present?
+    logs = logs.by_environment(filters[:environment]) if filters[:environment].present?
+    logs = logs.unresolved if filters[:unresolved] == "true"
+    logs = logs.resolved if filters[:resolved] == "true"
+    logs = logs.with_storage_issues if filters[:storage_issues] == "true"
     logs
   end
 end

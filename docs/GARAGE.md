@@ -3,7 +3,7 @@
 > **Storage Provider:** Self-Hosted S3-Compatible Object Storage
 > **Container Image:** `dxflrs/garage:v1.0.1`
 > **S3 API Endpoint:** `http://localhost:3100` (Host) / `http://garage:3100` (Docker Network)
-> **Admin REST API:** `http://localhost:3101` (Host)
+> **Admin REST API:** `http://localhost:3101` (Host Loopback Only / Private)
 > **Internal RPC:** `3901` (Container Network)
 > **Default Bucket:** `rexone`
 > **Default Region:** `garage`
@@ -139,7 +139,7 @@ Garage generates unique, cryptographically random keys on-demand without requiri
 
 For browsing object storage, viewing thumbnails, and inspecting bucket hierarchies:
 
-#### 1. Rexone Web Admin (`/admin/assets`) — Built-In
+#### 1. RexOne Web Admin (`/admin/assets`) — Built-In
 
 - **URL**: [http://localhost:4000/admin/assets](http://localhost:4000/admin/assets) (Web) or [http://localhost:3000/admin/assets](http://localhost:3000/admin/assets) (API).
 - **Features**: Visual asset gallery, media player (audio/video), dimension and MIME metadata, underground compression metrics, and soft/hard delete lifecycle.
@@ -189,7 +189,7 @@ graph TD
 | Port     | Service     | Scope                                            | Default Host Binding             |
 | :------- | :---------- | :----------------------------------------------- | :------------------------------- |
 | **3100** | S3 API      | Upload, download, delete, presigned URLs         | `http://localhost:3100`          |
-| **3101** | Admin API   | Node clustering, layout, key & bucket management | `http://localhost:3101`          |
+| **3101** | Admin API   | Node clustering, layout, key & bucket management | `http://localhost:3101` (Loopback Only)          |
 | **3901** | Cluster RPC | Internal cluster node synchronization            | Container internal (`[::]:3901`) |
 
 ---
@@ -220,12 +220,12 @@ Here are the real-world issues you may encounter when setting up and running Gar
 - **Root Cause**: Garage's S3 API (`[s3_api]` on port 3100) is private by default. It requires AWS SigV4 authentication on every request and intentionally rejects unauthenticated/anonymous HTTP `GET` requests.
 - **Solution**:
   - Never use plain, unauthenticated S3 URLs in the frontend.
-  - Rexone Core automatically issues **AWS S3 Presigned URLs** via `Aws::S3::Presigner` on port 3100 with a 7-day expiration (`expires_in: 7.days.to_i`).
+  - RexOne Core automatically issues **AWS S3 Presigned URLs** via `Aws::S3::Presigner` on port 3100 with a 7-day expiration (`expires_in: 7.days.to_i`).
   - `AssetSerializer` and `Asset#storage_url` generate fully signed URLs (`?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Signature=...`) that web browsers, mobile apps, and video players can access seamlessly.
 
 ### 🔴 Problem 2: `Errno::ECONNREFUSED` on `localhost:3100` Inside Background Workers
 
-- **Symptom**: Background jobs (`Media::CompressImageJob` or `Media::CompressVideoJob`) fail with `Failed to open TCP connection to localhost:3100 (Connection refused - connect(2) for "localhost" port 3100)`.
+- **Symptom**: Background jobs (`Media::CompressMediaJob`) fail with `Failed to open TCP connection to localhost:3100 (Connection refused - connect(2) for "localhost" port 3100)`.
 - **Root Cause**: Inside a Docker container (`media` or `waka`), `localhost:3100` resolves to the worker container itself where no Garage daemon is running.
 - **Solution**:
   - The backend uses internal Docker network routing (`S3_ENDPOINT=http://garage:3100`), whereas external clients use `S3_PUBLIC_ENDPOINT=http://localhost:3100`.
@@ -262,7 +262,7 @@ Here are the real-world issues you may encounter when setting up and running Gar
 - **Symptom**: Starting Garage on port 5000 fails because the port is already in use by a macOS system process (`ControlCenter`).
 - **Root Cause**: macOS Monterey and newer bind port 5000 to the system **AirPlay Receiver**.
 - **Solution**:
-  - Rexone Core intentionally configures Garage on ports **`3100`** (S3 API) and **`3101`** (Admin API), avoiding any macOS AirPlay conflicts without requiring changes to macOS system settings.
+  - RexOne Core intentionally configures Garage on ports **`3100`** (S3 API) and **`3101`** (Admin API), avoiding any macOS AirPlay conflicts without requiring changes to macOS system settings.
 
 ### 🔴 Problem 6: Cyberduck Error: `Failed to parse XML document with handler class org.jets3t.service.impl.rest.XmlResponsesSaxParser$ListBucketHandler`
 
@@ -285,7 +285,7 @@ Here are the real-world issues you may encounter when setting up and running Gar
 **No.** The silent media compression pipeline operates strictly **in-place**:
 
 1. **Exact Storage Key Re-Use**:
-   When `Media::CompressImageJob` or `Media::CompressVideoJob` processes an asset, it downloads the original file to a temporary worker scratchpad, compresses it, and calls:
+   When `Media::CompressMediaJob` processes an asset, it downloads the original file to a temporary worker scratchpad, compresses it, and calls:
    ```ruby
    StorageService::Client.upload(
      compressed_path,
@@ -427,11 +427,8 @@ In `rexone-web` at `/admin/assets`, administrators can monitor storage metrics d
 
 ---
 
-### Server Downtime & Persistence
-
-> [!IMPORTANT]
-> **Rebooting or restarting servers DOES NOT lose any data.**
-> Docker named volumes (`postgres`, `garage-meta`, `garage-data`) are permanently decoupled from container lifecycles. Running `docker compose down`, `docker restart`, or rebooting the physical VPS leaves all database rows and Garage files 100% intact.
+### 🛡️ Server Downtime & Data Persistence Guarantee
+**Rebooting or restarting servers DOES NOT lose any data.** Docker named volumes (`postgres`, `garage-meta`, `garage-data`) are permanently decoupled from container lifecycles. Running `docker compose down`, `docker restart`, or rebooting the physical VPS leaves all database rows and Garage files 100% intact.
 
 ---
 

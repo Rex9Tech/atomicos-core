@@ -3,8 +3,8 @@
 module AnalyticsService
   class Overview
     class << self
-      def call(...)
-        new(...).call
+      def call(period: AnalyticsConstants::Period::THIRTY_DAYS, start_date: nil, end_date: nil)
+        new(period: period, start_date: start_date, end_date: end_date).call
       end
     end
 
@@ -86,11 +86,7 @@ module AnalyticsService
     end
 
     def parse_utc(value, fallback:)
-      return fallback if value.blank?
-
-      Time.zone.parse(value.to_s)&.utc || fallback
-    rescue
-      fallback
+      TimeService.parse_utc(value, fallback: fallback)
     end
 
     ACTIVE_SUB_STATUSES = [
@@ -98,7 +94,7 @@ module AnalyticsService
       PaymentConstants::SubscriptionStatus::TRIALING
     ].freeze
 
-    SUCCEEDED_TX_STATUS = PaymentConstants::TransactionStatus::SUCCEEDED
+    SUCCEEDED_PURCHASE_STATUS = PaymentConstants::PurchaseStatus::SUCCEEDED
 
     def build_kpis
       # Users
@@ -107,22 +103,22 @@ module AnalyticsService
       new_users_prev = User.kept.where(created_at: prev_time_range).count
 
       # Revenue (in major currency units, dividing cents by 100)
-      # Combined: One-time succeeded transactions + Active/Trialing subscriptions
-      tx_total_cents  = Payment::Transaction.kept.where(status: SUCCEEDED_TX_STATUS).sum(:price_unit_amount)
-      sub_total_cents = Payment::Subscription.kept.joins(:product).where(status: ACTIVE_SUB_STATUSES).sum("payment_products.price_unit_amount")
-      total_revenue_cents = tx_total_cents + sub_total_cents
+      # Combined: One-time succeeded purchases + Active/Trialing subscriptions
+      purchase_total_cents  = Payment::Purchase.kept.where(status: SUCCEEDED_PURCHASE_STATUS).sum(:unit_amount)
+      sub_total_cents       = subscription_revenue(Payment::Subscription.kept.where(status: ACTIVE_SUB_STATUSES))
+      total_revenue_cents   = purchase_total_cents + sub_total_cents
 
-      tx_period_cents  = Payment::Transaction.kept.where(status: SUCCEEDED_TX_STATUS, created_at: time_range).sum(:price_unit_amount)
-      sub_period_cents = Payment::Subscription.kept.joins(:product).where(status: ACTIVE_SUB_STATUSES, payment_subscriptions: { created_at: time_range }).sum("payment_products.price_unit_amount")
-      period_revenue_cents = tx_period_cents + sub_period_cents
+      purchase_period_cents = Payment::Purchase.kept.where(status: SUCCEEDED_PURCHASE_STATUS, created_at: time_range).sum(:unit_amount)
+      sub_period_cents      = subscription_revenue(Payment::Subscription.kept.where(status: ACTIVE_SUB_STATUSES, created_at: time_range))
+      period_revenue_cents  = purchase_period_cents + sub_period_cents
 
-      tx_prev_cents  = Payment::Transaction.kept.where(status: SUCCEEDED_TX_STATUS, created_at: prev_time_range).sum(:price_unit_amount)
-      sub_prev_cents = Payment::Subscription.kept.joins(:product).where(status: ACTIVE_SUB_STATUSES, payment_subscriptions: { created_at: prev_time_range }).sum("payment_products.price_unit_amount")
-      prev_revenue_cents = tx_prev_cents + sub_prev_cents
+      purchase_prev_cents   = Payment::Purchase.kept.where(status: SUCCEEDED_PURCHASE_STATUS, created_at: prev_time_range).sum(:unit_amount)
+      sub_prev_cents        = subscription_revenue(Payment::Subscription.kept.where(status: ACTIVE_SUB_STATUSES, created_at: prev_time_range))
+      prev_revenue_cents    = purchase_prev_cents + sub_prev_cents
 
-      # Transactions
-      period_transactions = Payment::Transaction.kept.where(status: SUCCEEDED_TX_STATUS, created_at: time_range).count
-      prev_transactions   = Payment::Transaction.kept.where(status: SUCCEEDED_TX_STATUS, created_at: prev_time_range).count
+      # Purchases
+      period_purchases = Payment::Purchase.kept.where(status: SUCCEEDED_PURCHASE_STATUS, created_at: time_range).count
+      prev_purchases   = Payment::Purchase.kept.where(status: SUCCEEDED_PURCHASE_STATUS, created_at: prev_time_range).count
 
       # Subscriptions
       active_subscriptions = Payment::Subscription.kept.where(status: ACTIVE_SUB_STATUSES).count
@@ -141,6 +137,12 @@ module AnalyticsService
       # Feedbacks
       period_feedbacks = Feedback.kept.where(created_at: time_range).count
 
+      # Coupons & Discounts
+      period_coupons_count = Payment::UserCoupon.where(created_at: time_range).count
+      prev_coupons_count   = Payment::UserCoupon.where(created_at: prev_time_range).count
+      discounts_cents      = Payment::UserCoupon.where(created_at: time_range).sum(:discount_amount)
+      prev_discounts_cents = Payment::UserCoupon.where(created_at: prev_time_range).sum(:discount_amount)
+
       {
         total_users: total_users,
         new_users: new_users_current,
@@ -150,8 +152,8 @@ module AnalyticsService
         period_revenue: (period_revenue_cents / 100.0).round(2),
         revenue_delta_pct: calculate_delta_pct(period_revenue_cents, prev_revenue_cents),
 
-        period_transactions: period_transactions,
-        transactions_delta_pct: calculate_delta_pct(period_transactions, prev_transactions),
+        period_purchases: period_purchases,
+        purchases_delta_pct: calculate_delta_pct(period_purchases, prev_purchases),
 
         active_subscriptions: active_subscriptions,
 
@@ -162,7 +164,12 @@ module AnalyticsService
 
         unresolved_errors: unresolved_errors,
         period_errors: total_period_errors,
-        period_feedbacks: period_feedbacks
+        period_feedbacks: period_feedbacks,
+
+        coupons_used: period_coupons_count,
+        coupons_delta_pct: calculate_delta_pct(period_coupons_count, prev_coupons_count),
+        period_discounts: (discounts_cents / 100.0).round(2),
+        discounts_delta_pct: calculate_delta_pct(discounts_cents, prev_discounts_cents)
       }
     end
 
@@ -170,24 +177,26 @@ module AnalyticsService
       buckets = generate_bucket_keys
 
       # Group queries in pure UTC
-      users_by_bucket         = group_count(User.kept.where(created_at: time_range))
-      transactions_by_bucket  = group_count(Payment::Transaction.kept.where(status: SUCCEEDED_TX_STATUS, created_at: time_range))
-      tx_revenue_by_bucket    = group_sum(Payment::Transaction.kept.where(status: SUCCEEDED_TX_STATUS, created_at: time_range), :price_unit_amount)
-      sub_revenue_by_bucket   = group_sum(
-        Payment::Subscription.kept.joins(:product).where(status: ACTIVE_SUB_STATUSES, payment_subscriptions: { created_at: time_range }),
-        "payment_products.price_unit_amount",
+      users_by_bucket            = group_count(User.kept.where(created_at: time_range))
+      purchases_by_bucket        = group_count(Payment::Purchase.kept.where(status: SUCCEEDED_PURCHASE_STATUS, created_at: time_range))
+      purchase_revenue_by_bucket = group_sum(Payment::Purchase.kept.where(status: SUCCEEDED_PURCHASE_STATUS, created_at: time_range), :unit_amount)
+      sub_revenue_by_bucket      = group_sum(
+        Payment::Subscription.kept.where(status: ACTIVE_SUB_STATUSES, created_at: time_range),
+        "unit_amount * quantity",
         "payment_subscriptions.created_at"
       )
+      discounts_by_bucket     = group_sum(Payment::UserCoupon.where(created_at: time_range), :discount_amount)
       user_messages_by_bucket = group_count(Chat::Message.kept.where(role: AiConstants::ChatRole::USER, created_at: time_range))
       ai_messages_by_bucket   = group_count(Chat::Message.kept.where(role: AiConstants::ChatRole::ASSISTANT, created_at: time_range))
 
       buckets.map do |key, label|
-        rev_cents = (tx_revenue_by_bucket[key] || 0) + (sub_revenue_by_bucket[key] || 0)
+        rev_cents = (purchase_revenue_by_bucket[key] || 0) + (sub_revenue_by_bucket[key] || 0)
         {
           date: label,
           key: key,
           revenue: (rev_cents / 100.0).round(2),
-          transactions: transactions_by_bucket[key] || 0,
+          discounts: ((discounts_by_bucket[key] || 0) / 100.0).round(2),
+          purchases: purchases_by_bucket[key] || 0,
           new_users: users_by_bucket[key] || 0,
           user_messages: user_messages_by_bucket[key] || 0,
           ai_messages: ai_messages_by_bucket[key] || 0
@@ -197,37 +206,41 @@ module AnalyticsService
 
     def generate_bucket_keys
       buckets = {}
-      cursor = time_range.begin
-
-      while cursor <= time_range.end
-        case grain
-        when :hourly
+      case grain.to_s
+      when AnalyticsConstants::Grain::HOURLY
+        cursor = time_range.begin.beginning_of_hour
+        end_cursor = time_range.end.end_of_hour
+        while cursor <= end_cursor
           key = cursor.strftime("%Y-%m-%d %H:00")
-          label = cursor.iso8601
-          buckets[key] = label
+          buckets[key] = cursor.iso8601
           cursor += 1.hour
-        when :monthly
+        end
+      when AnalyticsConstants::Grain::MONTHLY
+        cursor = time_range.begin.beginning_of_month
+        end_cursor = time_range.end.end_of_month
+        while cursor <= end_cursor
           key = cursor.strftime("%Y-%m")
-          label = cursor.iso8601
-          buckets[key] = label
+          buckets[key] = cursor.iso8601
           cursor = cursor.next_month.beginning_of_month
-        else # :daily
+        end
+      else # daily
+        cursor = time_range.begin.beginning_of_day
+        end_cursor = time_range.end.end_of_day
+        while cursor <= end_cursor
           key = cursor.strftime("%Y-%m-%d")
-          label = cursor.iso8601
-          buckets[key] = label
+          buckets[key] = cursor.iso8601
           cursor += 1.day
         end
       end
-
       buckets
     end
 
     def group_count(scope, time_col = nil)
       col = time_col || "#{scope.table_name}.created_at"
-      case grain
-      when :hourly
+      case grain.to_s
+      when AnalyticsConstants::Grain::HOURLY
         scope.group("TO_CHAR(#{col}, 'YYYY-MM-DD HH24:00')").count
-      when :monthly
+      when AnalyticsConstants::Grain::MONTHLY
         scope.group("TO_CHAR(#{col}, 'YYYY-MM')").count
       else
         scope.group("TO_CHAR(#{col}, 'YYYY-MM-DD')").count
@@ -236,20 +249,24 @@ module AnalyticsService
 
     def group_sum(scope, column, time_col = nil)
       col = time_col || "#{scope.table_name}.created_at"
-      case grain
-      when :hourly
+      case grain.to_s
+      when AnalyticsConstants::Grain::HOURLY
         scope.group("TO_CHAR(#{col}, 'YYYY-MM-DD HH24:00')").sum(column)
-      when :monthly
+      when AnalyticsConstants::Grain::MONTHLY
         scope.group("TO_CHAR(#{col}, 'YYYY-MM')").sum(column)
       else
         scope.group("TO_CHAR(#{col}, 'YYYY-MM-DD')").sum(column)
       end
     end
 
+    def subscription_revenue(scope)
+      scope.sum("unit_amount * quantity")
+    end
+
     def build_breakdowns
-      subscription_cycles = Payment::Subscription.kept
+      subscription_intervals = Payment::Subscription.kept
         .where(status: ACTIVE_SUB_STATUSES)
-        .group(:cycle)
+        .group(:interval)
         .count
 
       feedback_ratings = Feedback.kept
@@ -263,10 +280,17 @@ module AnalyticsService
         .group(:platform)
         .count
 
+      coupons_by_type = Payment::UserCoupon
+        .where(created_at: time_range)
+        .joins(:coupon)
+        .group("coupons.coupon_type")
+        .count
+
       {
-        subscriptions_by_cycle: subscription_cycles,
+        subscriptions_by_interval: subscription_intervals,
         feedback_ratings: feedback_ratings,
-        errors_by_platform: errors_by_platform
+        errors_by_platform: errors_by_platform,
+        coupons_by_type: coupons_by_type
       }
     end
 

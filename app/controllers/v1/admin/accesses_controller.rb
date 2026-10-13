@@ -4,11 +4,12 @@ class V1::Admin::AccessesController < V1::ApplicationController
 
   # GET /v1/admin/accesses
   def index
+    filters = filter_params
     accesses = AccessService.list_for_admin(
-      status: params[:status],
-      product_id: params[:product_id],
-      user_id: params[:user_id],
-      search: params[:search]
+      status: filters[:status],
+      product_id: filters[:product_id],
+      user_id: filters[:user_id],
+      search: filters[:search]
     )
     accesses = sort(accesses, columns: SortConstants::Columns::ACCESS)
     pagy, records = pagy(accesses)
@@ -16,8 +17,7 @@ class V1::Admin::AccessesController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: access_message(MessageService::Access::FETCHED),
-      data: AccessSerializer.paginated(records, pagy),
-      pagy: pagy
+      **AccessSerializer.collection_pagy(records, pagy)
     )
   end
 
@@ -26,7 +26,7 @@ class V1::Admin::AccessesController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: access_message(MessageService::Access::FETCHED),
-      data: AccessSerializer.new(@access).serializable_hash[:data]
+      data: AccessSerializer.record(@access)
     )
   end
 
@@ -67,7 +67,16 @@ class V1::Admin::AccessesController < V1::ApplicationController
       )
     end
 
-    data = accesses.map { |a| AccessSerializer.new(a).serializable_hash[:data] }
+    eligible_users.each do |user|
+      user.update_column(:jti, SecureRandom.uuid)
+      SocketService::Client.broadcast(
+        user_id: user.id,
+        message: access_message(MessageService::Access::GRANTED),
+        data: { type: NotificationConstants::NotificationType::ACCESS_UPDATED, product_id: product.id }
+      )
+    end
+
+    data = AccessSerializer.collection(accesses)
 
     render_json_response(
       status_code: 201,
@@ -106,17 +115,31 @@ class V1::Admin::AccessesController < V1::ApplicationController
       days: days,
       expires_at: expires_at
     )
+    @access.user&.update_column(:jti, SecureRandom.uuid)
+
+    SocketService::Client.broadcast(
+      user_id: @access.user_id,
+      message: access_message(MessageService::Access::EXTENDED),
+      data: { type: NotificationConstants::NotificationType::ACCESS_UPDATED, product_id: @access.product_id }
+    )
 
     render_json_response(
       status_code: 200,
       message: access_message(MessageService::Access::EXTENDED),
-      data: AccessSerializer.new(access).serializable_hash[:data]
+      data: AccessSerializer.record(access)
     )
   end
 
   # DELETE /v1/admin/accesses/:id
   def destroy
     @access.revoke!
+    @access.user&.update_column(:jti, SecureRandom.uuid)
+
+    SocketService::Client.broadcast(
+      user_id: @access.user_id,
+      message: access_message(MessageService::Access::REVOKED),
+      data: { type: NotificationConstants::NotificationType::ACCESS_REVOKED, product_id: @access.product_id }
+    )
 
     render_json_response(
       status_code: 200,
@@ -127,7 +150,7 @@ class V1::Admin::AccessesController < V1::ApplicationController
   private
 
   def set_access
-    @access = Access.find(params[:id])
+    @access = Access.find(params.permit(:id)[:id])
   end
 
   def find_product_for_grant!
@@ -175,6 +198,10 @@ class V1::Admin::AccessesController < V1::ApplicationController
     else
       raw.to_s.split(/[,\n]/).map(&:strip).reject(&:blank?)
     end
+  end
+
+  def filter_params
+    params.permit(:status, :product_id, :user_id, :search)
   end
 
   def access_params

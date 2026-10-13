@@ -25,9 +25,12 @@ module Chat
                    prefix: :ai
 
     store_accessor :metadata, :tts_status, :tts_error
+    store_accessor :metadata, :chunk_index, :total_chunks, :split_id
 
     belongs_to :room, class_name: "Chat::Room"
+    belongs_to :ai_profile, class_name: "Ai::Profile", optional: true
     has_many :assets, as: :assetable, dependent: :nullify
+    has_many :ai_runs, class_name: "Ai::Run", foreign_key: :chat_message_id, dependent: :nullify
 
     validates :role, presence: true, inclusion: { in: [ AiConstants::ChatRole::USER, AiConstants::ChatRole::ASSISTANT ] }
     validates :content, presence: true
@@ -52,9 +55,13 @@ module Chat
       user? && ai_status.in?(PROCESSING_STATUSES)
     end
 
+    def chunked?
+      split_id.present?
+    end
+
     def tts_asset
       assets.find_or_initialize_by(
-        type: AssetConstants::AssetType::AUDIO,
+        type: AssetConstants::AssetType::TTS,
         source: AssetConstants::AssetSource::UPLOAD
       )
     end

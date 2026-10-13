@@ -3,7 +3,14 @@
 # Comprehensive, idempotent database synchronization & backfill script.
 # Safely updates schema and backfills data WITHOUT dropping tables or losing user data.
 
-docker compose -f docker-compose.dev.yaml exec api bundle exec rails runner "
+TARGET_ENVS=("$@")
+if [ ${#TARGET_ENVS[@]} -eq 0 ]; then
+  TARGET_ENVS=("development" "test")
+fi
+
+for BACKFILL_ENV in "${TARGET_ENVS[@]}"; do
+  echo "🚀 Running database synchronization for environment: $BACKFILL_ENV"
+  docker compose -f docker-compose.dev.yaml exec -e RAILS_ENV="$BACKFILL_ENV" api bundle exec rails runner "
   ActiveRecord::Base.transaction do
     puts '========================================================'
     puts '🚀 STARTING DATABASE SYNCHRONIZATION & BACKFILL'
@@ -12,7 +19,7 @@ docker compose -f docker-compose.dev.yaml exec api bundle exec rails runner "
     # ----------------------------------------------------
     # 1. PAYMENT PRODUCTS: Code Column & Unique Backfill
     # ----------------------------------------------------
-    puts '\n📦 [1/4] Synchronizing Payment Products...'
+    puts '\n📦 [1/7] Synchronizing Payment Products...'
     unless ActiveRecord::Base.connection.column_exists?(:payment_products, :code)
       puts '  -> Adding missing \"code\" column to payment_products table...'
       ActiveRecord::Base.connection.add_column :payment_products, :code, :string
@@ -42,7 +49,7 @@ docker compose -f docker-compose.dev.yaml exec api bundle exec rails runner "
     # ----------------------------------------------------
     # 2. IAM: Permissions & System Roles Synchronization
     # ----------------------------------------------------
-    puts '\n🔐 [2/4] Synchronizing IAM Permissions & Roles...'
+    puts '\n🔐 [2/7] Synchronizing IAM Permissions & Roles...'
     perm_count = 0
     Iam::Permission::RESOURCES.each do |resource|
       Iam::Permission::ACTIONS.each do |action|
@@ -93,7 +100,7 @@ docker compose -f docker-compose.dev.yaml exec api bundle exec rails runner "
     # ----------------------------------------------------
     # 3. USERS: Ensure Every User Has a Role
     # ----------------------------------------------------
-    puts '\n👥 [3/4] Ensuring All Users Have Roles Assigned...'
+    puts '\n👥 [3/7] Ensuring All Users Have Roles Assigned...'
     orphaned_user_count = 0
     User.find_each do |user|
       if user.user_roles.empty?
@@ -107,7 +114,7 @@ docker compose -f docker-compose.dev.yaml exec api bundle exec rails runner "
     # ----------------------------------------------------
     # 4. ENTITLEMENT ACCESSES & LOGS: Backfill Timestamps
     # ----------------------------------------------------
-    puts '\n📋 [4/4] Sanitizing Accesses and System Telemetry...'
+    puts '\n📋 [4/7] Sanitizing Accesses and System Telemetry...'
     Access.where(granted_at: nil).find_each do |access|
       access.update_columns(granted_at: access.created_at || Time.current)
     end
@@ -122,8 +129,88 @@ docker compose -f docker-compose.dev.yaml exec api bundle exec rails runner "
     end
     puts '  ✅ Accesses and client logs sanitized.'
 
+    # ----------------------------------------------------
+    # 5. NOTIFICATIONS: Client Targeting & CTA Text
+    # ----------------------------------------------------
+    puts '\n🔔 [5/7] Synchronizing notifications (client targeting & CTA text)...'
+    default_clients = NotificationConstants::Client::DEFAULT
+
+    unless ActiveRecord::Base.connection.column_exists?(:notifications, :cta_text)
+      puts '  -> Adding missing \"cta_text\" column to notifications table...'
+      ActiveRecord::Base.connection.add_column :notifications, :cta_text, :string
+    end
+
+    [ :notifications, :user_notifications ].each do |table|
+      unless ActiveRecord::Base.connection.column_exists?(table, :clients)
+        ActiveRecord::Base.connection.add_column table, :clients, :string, array: true, null: false, default: default_clients
+      end
+
+      ActiveRecord::Base.connection.execute(<<~SQL)
+        UPDATE #{table}
+        SET clients = ARRAY['web', 'mobile']::varchar[]
+        WHERE clients IS NULL OR cardinality(clients) = 0
+      SQL
+
+      unless ActiveRecord::Base.connection.index_exists?(table, :clients)
+        ActiveRecord::Base.connection.add_index table, :clients, using: :gin
+      end
+    end
+    UserNotification.where('link LIKE ?', '/admin/%')
+                    .update_all(clients: NotificationConstants::Client::ADMIN_PORTAL)
+    puts '  ✅ Existing notifications target both clients; admin routes target Web only.'
+
+    # ----------------------------------------------------
+    # 6. ASSETS: title and description
+    # ----------------------------------------------------
+    puts '\n📁 [6/7] Synchronizing Assets title & description...'
+    unless ActiveRecord::Base.connection.column_exists?(:assets, :title)
+      puts '  -> Adding missing \"title\" column to assets table...'
+      ActiveRecord::Base.connection.add_column :assets, :title, :string
+    end
+
+    unless ActiveRecord::Base.connection.column_exists?(:assets, :description)
+      puts '  -> Adding missing \"description\" column to assets table...'
+      ActiveRecord::Base.connection.add_column :assets, :description, :text
+    end
+
+    unless ActiveRecord::Base.connection.index_exists?(:assets, :title)
+      puts '  -> Adding index on assets(title)...'
+      ActiveRecord::Base.connection.add_index :assets, :title
+    end
+
+    backfilled_assets = 0
+    Asset.with_discarded.where(title: [nil, ""]).find_each do |asset|
+      asset.update_columns(title: asset.name)
+      backfilled_assets += 1
+    end
+    puts \"  -> Backfilled title for #{backfilled_assets} assets.\"
+    puts '  ✅ Assets title and description synchronized and backfilled.'
+
+    # ----------------------------------------------------
+    # 7. METADATA JSONB STANDARDIZATION
+    # ----------------------------------------------------
+    puts '\n📋 [7/7] Standardizing JSONB metadata columns...'
+    if ActiveRecord::Base.connection.column_exists?(:user_notifications, :data) &&
+       !ActiveRecord::Base.connection.column_exists?(:user_notifications, :metadata)
+      puts '  -> Renaming column data to metadata on user_notifications...'
+      ActiveRecord::Base.connection.rename_column :user_notifications, :data, :metadata
+    end
+
+    [ :assets, :user_notifications, :notifications, :client_versions, :coupons ].each do |table|
+      unless ActiveRecord::Base.connection.column_exists?(table, :metadata)
+        puts \"  -> Adding missing 'metadata' jsonb column to #{table} table...\"
+        ActiveRecord::Base.connection.add_column table, :metadata, :jsonb, default: {}, null: false
+      end
+
+      ActiveRecord::Base.connection.execute(<<~SQL)
+        UPDATE #{table} SET metadata = '{}'::jsonb WHERE metadata IS NULL;
+      SQL
+    end
+    puts '  ✅ Metadata JSONB columns fully standardized across assets, notifications, client_versions, and coupons.'
+
     puts '\n========================================================'
     puts '🎉 ALL DATABASE SYNCHRONIZATIONS & BACKFILLS COMPLETED!'
     puts '========================================================'
   end
 "
+done

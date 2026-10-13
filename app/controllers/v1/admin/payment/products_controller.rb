@@ -4,29 +4,23 @@ class V1::Admin::Payment::ProductsController < V1::ApplicationController
 
   # GET /v1/admin/payment/products
   def index
-    products = ::Payment::Product.all
-    products = sort(products, columns: SortConstants::Columns::PRODUCT)
-    pagy, records = pagy(products)
+    filters = filter_params
+    discarded = filters[:discarded].to_s == "true"
+    products = discarded ? ::Payment::Product.with_discarded.discarded : ::Payment::Product.all
+    products = search_products(products, search_term: filters[:search])
+    products = if discarded
+      sort(products, columns: SortConstants::Columns::PRODUCT, default_column: :discarded_at)
+    else
+      sort(products, columns: SortConstants::Columns::PRODUCT)
+    end
+    pagy, records = pagy(products, limit: filters[:limit])
 
     render_json_response(
       status_code: 200,
-      message: payment_message(MessageService::Payment::PRODUCTS_FETCHED),
-      data: ::Payment::ProductSerializer.paginated(records, pagy),
-      pagy: pagy
-    )
-  end
-
-  # GET /v1/admin/payment/products/discarded
-  def read_discarded
-    products = ::Payment::Product.with_discarded.discarded
-    products = sort(products, columns: SortConstants::Columns::PRODUCT, default_column: :discarded_at)
-    pagy, records = pagy(products)
-
-    render_json_response(
-      status_code: 200,
-      message: payment_message(MessageService::Payment::DISCARDED_PRODUCTS_FETCHED),
-      data: ::Payment::ProductSerializer.paginated(records, pagy),
-      pagy: pagy
+      message: payment_message(
+        discarded ? MessageService::Payment::DISCARDED_PRODUCTS_FETCHED : MessageService::Payment::PRODUCTS_FETCHED
+      ),
+      **::Payment::ProductSerializer.collection_pagy(records, pagy)
     )
   end
 
@@ -35,13 +29,13 @@ class V1::Admin::Payment::ProductsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: payment_message(MessageService::Payment::PRODUCT_FETCHED),
-      data: ::Payment::ProductSerializer.new(@product).serializable_hash[:data][:attributes]
+      data: ::Payment::ProductSerializer.record(@product)
     )
   end
 
   # POST /v1/admin/payment/products
   def create
-    result = PaymentService::Client.create_product(product_params)
+    result = Payment::Providers::Client.create_product(product_params.except(:thumbnail_asset_id))
     return render_service_error(MessageService::Payment::PRODUCT_CREATE_FAILED, result[:error]) if result[:error]
 
     product = result[:data]
@@ -53,7 +47,7 @@ class V1::Admin::Payment::ProductsController < V1::ApplicationController
     render_json_response(
       status_code: 201,
       message: payment_message(MessageService::Payment::PRODUCT_CREATED),
-      data: ::Payment::ProductSerializer.new(product).serializable_hash[:data][:attributes]
+      data: ::Payment::ProductSerializer.record(product)
     )
   rescue ActiveRecord::RecordInvalid => error
     render_service_error(MessageService::Payment::PRODUCT_CREATE_FAILED, error.record.errors.full_messages.to_sentence)
@@ -61,7 +55,7 @@ class V1::Admin::Payment::ProductsController < V1::ApplicationController
 
   # PATCH/PUT /v1/admin/payment/products/:id
   def update
-    result = PaymentService::Client.update_product(@product.id, product_params)
+    result = Payment::Providers::Client.update_product(@product.id, product_params.except(:thumbnail_asset_id))
     return render_service_error(MessageService::Payment::PRODUCT_UPDATE_FAILED, result[:error]) if result[:error]
 
     product = result[:data]
@@ -73,7 +67,7 @@ class V1::Admin::Payment::ProductsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: payment_message(MessageService::Payment::PRODUCT_UPDATED),
-      data: ::Payment::ProductSerializer.new(product).serializable_hash[:data][:attributes]
+      data: ::Payment::ProductSerializer.record(product)
     )
   rescue ActiveRecord::RecordInvalid => error
     render_service_error(MessageService::Payment::PRODUCT_UPDATE_FAILED, error.record.errors.full_messages.to_sentence)
@@ -81,7 +75,7 @@ class V1::Admin::Payment::ProductsController < V1::ApplicationController
 
   # POST /v1/admin/payment/products/:id/discard
   def discard
-    result = PaymentService::Client.discard_product(@product.id)
+    result = Payment::Providers::Client.discard_product(@product.id)
     return render_service_error(MessageService::Payment::PRODUCT_DISCARD_FAILED, result[:error]) if result[:error]
 
     render_json_response(
@@ -92,41 +86,61 @@ class V1::Admin::Payment::ProductsController < V1::ApplicationController
 
   # POST /v1/admin/payment/products/:id/undiscard
   def undiscard
-    result = PaymentService::Client.undiscard_product(@product.id)
+    result = Payment::Providers::Client.undiscard_product(@product.id)
     return render_service_error(MessageService::Payment::PRODUCT_RESTORE_FAILED, result[:error]) if result[:error]
 
     render_json_response(
       status_code: 200,
       message: payment_message(MessageService::Payment::PRODUCT_RESTORED),
-      data: ::Payment::ProductSerializer.new(result[:data]).serializable_hash[:data][:attributes]
+      data: ::Payment::ProductSerializer.record(result[:data])
     )
   end
 
   private
 
   def set_active_product
-    @product = ::Payment::Product.find(params[:id])
+    @product = ::Payment::Product.find(id_params[:id])
   end
 
   def set_product_including_discarded
-    @product = ::Payment::Product.with_discarded.find(params[:id])
+    @product = ::Payment::Product.with_discarded.find(id_params[:id])
+  end
+
+  def filter_params
+    params.permit(:discarded, :search, :limit, :page)
+  end
+
+  def search_products(scope, search_term: nil)
+    return scope if search_term.blank?
+
+    pattern = "%#{ActiveRecord::Base.sanitize_sql_like(search_term.to_s.strip)}%"
+    scope.where(
+      "payment_products.name ILIKE :search OR payment_products.code ILIKE :search OR payment_products.description ILIKE :search",
+      search: pattern
+    )
+  end
+
+  def id_params
+    params.permit(:id)
   end
 
   def product_params
-    values = params.require(:product)
-                   .permit(:code, :name, :description, :price_unit_amount, :currency, :cycle, :active)
-                   .to_h
-                   .symbolize_keys
-
-    values
+    params.require(:product)
+          .permit(
+            :code, :name, :description, :unit_amount, :currency, :interval, :active,
+            :thumbnail_asset_id, :stripe_product_id, :stripe_price_id,
+            :google_play_product_id, :app_store_product_id
+          )
+          .to_h
+          .symbolize_keys
   end
 
   def thumbnail_param_provided?
-    params[:product].respond_to?(:key?) && params[:product].key?(:thumbnail_asset_id)
+    product_params.key?(:thumbnail_asset_id)
   end
 
   def assign_thumbnail(product)
-    thumbnail_asset_id = params.dig(:product, :thumbnail_asset_id)
+    thumbnail_asset_id = product_params[:thumbnail_asset_id]
 
     if thumbnail_asset_id.present?
       asset = Asset.find(thumbnail_asset_id)

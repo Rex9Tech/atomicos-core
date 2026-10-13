@@ -8,7 +8,11 @@ class CreateUserNotifications < ActiveRecord::Migration[8.1]
       t.string :title, null: false
       t.text :message, null: false
       t.string :link
-      t.jsonb :data, default: {}, null: false
+      t.string :clients, array: true, null: false, default: %w[web mobile]
+      t.jsonb :metadata, default: {}, null: false
+      t.string :operation_id
+      t.string :operation_type
+      t.string :operation_status
 
       t.datetime :read_at
 
@@ -27,6 +31,8 @@ class CreateUserNotifications < ActiveRecord::Migration[8.1]
 
     add_index :user_notifications, [ :user_id, :created_at ]
     add_index :user_notifications, [ :user_id, :read_at ]
+    add_index :user_notifications, [ :user_id, :operation_id ]
     add_index :user_notifications, :discarded_at
+    add_index :user_notifications, :clients, using: :gin
   end
 end

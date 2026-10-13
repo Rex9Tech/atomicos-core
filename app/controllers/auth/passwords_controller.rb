@@ -2,18 +2,33 @@
 class Auth::PasswordsController < Devise::PasswordsController
   respond_to :json
 
+  skip_before_action :enforce_active_platform_session!
+
   # POST /password/forgot
   def create
-    email = params[:email].to_s.strip.downcase
+    email = forgot_password_params[:email].to_s.strip.downcase
     user = User.with_discarded.find_by(email: email)
     if user
       return render_discarded_account if user.discarded?
+
+      limiter = PasswordService.new(user.id)
+      unless limiter.reset_allowed?
+        remaining = limiter.reset_cooldown_remaining
+        return render_json_response(
+          status_code: 429,
+          meta: { cooldown_remaining: remaining },
+          message: auth_message(MessageService::Auth::PASSWORD_RESET_COOLDOWN, seconds: remaining),
+          error: auth_message(MessageService::Auth::PASSWORD_RESET_COOLDOWN, seconds: remaining)
+        )
+      end
 
       token = user.send_reset_password_instructions
       NotificationService::Center.password_reset_email(
         email: user.email,
         token: token
       )
+
+      limiter.record_reset_request
 
       render_json_response(
         status_code: 200,
@@ -35,6 +50,15 @@ class Auth::PasswordsController < Devise::PasswordsController
   def update
     user = User.reset_password_by_token(reset_password_params)
     if user.errors.empty?
+      PasswordService.new(user.id).record_reset_success
+      user.update_column(:jti, SecureRandom.uuid)
+      AuthConstants::Session.clear_all(user.id)
+      SocketService::Client.broadcast(
+        user_id: user.id,
+        message: auth_message(MessageService::Auth::ACTIVE_SESSION_NOT_FOUND),
+        data: { type: NotificationConstants::NotificationType::SESSION_INVALIDATED }
+      )
+
       render_json_response(
         status_code: 200,
         message: auth_message(MessageService::Auth::PASSWORD_RESET)
@@ -50,7 +74,7 @@ class Auth::PasswordsController < Devise::PasswordsController
 
   # GET /password/edit?reset_password_token=abcdef
   def edit
-    redirect_to "#{AppConfig::CLIENT_BASE_URL}#{AuthConstants::ClientRoutes::PASSWORD_RESET}?reset_password_token=#{params[:reset_password_token]}", allow_other_host: true
+    redirect_to "#{AppConfig::CLIENT_BASE_URL}#{AuthConstants::ClientRoutes::PASSWORD_RESET}?reset_password_token=#{edit_password_params[:reset_password_token]}", allow_other_host: true
   end
 
   private
@@ -69,5 +93,13 @@ class Auth::PasswordsController < Devise::PasswordsController
 
   def reset_password_params
     params.require(:user).permit(:reset_password_token, :password, :password_confirmation)
+  end
+
+  def forgot_password_params
+    params.permit(:email)
+  end
+
+  def edit_password_params
+    params.permit(:reset_password_token)
   end
 end

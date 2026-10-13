@@ -7,18 +7,23 @@ class V1::Client::VersionsController < V1::ApplicationController
   # GET /v1/client/versions/current
   def read_current
     result = Client::VersionService.check(
-      version: params[:version],
-      platform: platform_session
+      version: current_params[:version],
+      platform: platform_session,
+      build_number: current_params[:build_number]
     )
 
     render_json_response(
       status_code: 200,
       message: version_message(MessageService::Version::CURRENT_FETCHED),
-      data: { version: check_payload(result) }
+      data: check_payload(result)
     )
   end
 
   private
+
+  def current_params
+    params.permit(:version, :build_number)
+  end
 
   def check_payload(result)
     extras = {
@@ -29,10 +34,13 @@ class V1::Client::VersionsController < V1::ApplicationController
     }
 
     if result.latest
-      Client::VersionSerializer.new(result.latest, params: extras)
-        .serializable_hash[:data][:attributes]
+      Client::VersionSerializer.record(result.latest, params: extras)
     else
-      Client::VersionService::EMPTY_CATALOG.merge(extras)
+      {
+        id: nil,
+        type: "client_version",
+        attributes: Client::VersionService::EMPTY_CATALOG.merge(extras)
+      }
     end
   end
 

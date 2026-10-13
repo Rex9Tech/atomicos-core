@@ -14,6 +14,7 @@
     },
   ],
   "settings": {
+    "scm.repositories.sortOrder": "discovery time",
     "files.exclude": {
       "**/.git": true,
     },
@@ -22,6 +23,17 @@
     "flutterTools.displayRiverpodContextMenu": false,
     "flutterTools.displayModularContextMenu": false,
     "flutterTools.displaySignalsContextMenu": false,
-    "yaml.maxItemsComputed": 20000
+    "yaml.maxItemsComputed": 20000,
+    "java.configuration.updateBuildConfiguration": "interactive",
+    "java.compile.nullAnalysis.mode": "automatic",
+    "java.jdt.ls.vmargs": "-XX:+UseParallelGC -XX:GCTimeRatio=4 -XX:AdaptiveSizePolicyWeight=90 -Dsun.zip.disableMemoryMapping=true -Xmx4G -Xms100m -Xlog:disable",
+    "[ruby]": {
+      "editor.defaultFormatter": "misogi.ruby-rubocop",
+      "editor.formatOnSave": true,
+    },
+    "ruby.rubocop.executePath": "./bin/",
+    "ruby.rubocop.useBundler": false,
+    "ruby.rubocop.onSave": true,
+    "ruby.rubocop.suppressRubocopWarnings": true,
   },
 }

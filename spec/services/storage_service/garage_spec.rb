@@ -32,6 +32,61 @@ RSpec.describe StorageService::Garage do
 
       expect(adapter.url("uploads/test.png")).to eq("http://localhost:3100/rexone/uploads/test.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=xyz")
     end
+
+
+    it "derives the signed response MIME type from a format-changing audio key" do
+      presigner = double("Aws::S3::Presigner")
+      allow(Aws::S3::Presigner).to receive(:new).with(client: s3_client).and_return(presigner)
+      expect(presigner).to receive(:presigned_url).with(
+        :get_object,
+        bucket: "rexone",
+        key: "uploads/audio.m4a",
+        expires_in: 7.days.to_i,
+        response_content_type: "audio/mp4a-latm"
+      ).and_return("http://localhost:3100/rexone/uploads/audio.m4a?sig=123")
+
+      expect(adapter.url("uploads/audio.m4a")).to include("audio.m4a")
+    end
+  end
+
+  describe "#playback_url" do
+    it "creates a progressive presigned GET URL for inline media playback" do
+      asset = build(
+        :asset,
+        storage_key: "uploads/video.mp4",
+        extension: "mp4",
+        format: "video"
+      )
+      presigner = double("Aws::S3::Presigner")
+      allow(Aws::S3::Presigner).to receive(:new).with(client: s3_client).and_return(presigner)
+      expect(presigner).to receive(:presigned_url).with(
+        :get_object,
+        bucket: "rexone",
+        key: "uploads/video.mp4",
+        expires_in: 3600,
+        response_content_type: "video/mp4",
+        response_content_disposition: "inline"
+      ).and_return("http://localhost:3100/rexone/uploads/video.mp4?X-Amz-Signature=xyz")
+
+      travel_to Time.zone.parse("2026-09-14 10:00:00 UTC") do
+        expect(adapter.playback_url(asset, expires_in: 3600)).to eq(
+          type: "progressive",
+          url: "http://localhost:3100/rexone/uploads/video.mp4?X-Amz-Signature=xyz",
+          expires_at: Time.zone.parse("2026-09-14 11:00:00 UTC")
+        )
+      end
+    end
+
+    it "uses the configured public client when presigning playback URLs" do
+      public_client = double("Public S3 Client")
+      allow(Aws::S3::Client).to receive(:new).and_return(s3_client, public_client)
+      adapter = described_class.new
+      presigner = double("Aws::S3::Presigner", presigned_url: "http://localhost:3100/rexone/uploads/audio.mp3?sig=123")
+      allow(Aws::S3::Presigner).to receive(:new).with(client: public_client).and_return(presigner)
+      asset = build(:asset, storage_key: "uploads/audio.mp3", extension: "mp3", format: "audio")
+
+      expect(adapter.playback_url(asset, expires_in: 120)[:url]).to include("audio.mp3")
+    end
   end
 
   describe "#delete" do
@@ -274,20 +329,20 @@ RSpec.describe StorageService::Garage do
       hide_const("AppConfig::S3_FOLDER_PREFIX")
     end
 
-    it "falls back gracefully to ENV or nil without raising NameError" do
-      allow(ENV).to receive(:[]).and_call_original
-      allow(ENV).to receive(:[]).with("S3_FOLDER_PREFIX").and_return(nil)
-
+    it "falls back gracefully to nil without raising NameError" do
       expect(adapter.send(:folder_prefix)).to be_nil
       expect(adapter.send(:apply_prefix, "my_file.png")).to eq("my_file.png")
     end
+  end
 
-    it "uses ENV['S3_FOLDER_PREFIX'] when defined and constant is missing" do
-      allow(ENV).to receive(:[]).and_call_original
-      allow(ENV).to receive(:[]).with("S3_FOLDER_PREFIX").and_return("custom_env")
+  context "when AppConfig::S3_FOLDER_PREFIX is configured" do
+    before do
+      stub_const("AppConfig::S3_FOLDER_PREFIX", "custom_folder")
+    end
 
-      expect(adapter.send(:folder_prefix)).to eq("custom_env")
-      expect(adapter.send(:apply_prefix, "my_file.png")).to eq("custom_env/my_file.png")
+    it "uses AppConfig::S3_FOLDER_PREFIX" do
+      expect(adapter.send(:folder_prefix)).to eq("custom_folder")
+      expect(adapter.send(:apply_prefix, "my_file.png")).to eq("custom_folder/my_file.png")
     end
   end
 end

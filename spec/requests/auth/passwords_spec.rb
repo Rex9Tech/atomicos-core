@@ -1,7 +1,19 @@
 require "rails_helper"
 
 RSpec.describe "Password recovery", type: :request do
-  before { allow(NotificationService::Center).to receive(:password_reset_email) }
+  let(:memory_store) { ActiveSupport::Cache::MemoryStore.new }
+
+  before do
+    allow(NotificationService::Center).to receive(:password_reset_email)
+    allow(CacheService).to receive(:read) { |k| memory_store.read(k) }
+    allow(CacheService).to receive(:write) { |k, v, opts| memory_store.write(k, v, opts) }
+    allow(CacheService).to receive(:delete) { |k| memory_store.delete(k) }
+    allow(CacheService).to receive(:increment) do |k, amount, opts|
+      val = (memory_store.read(k) || 0) + amount
+      memory_store.write(k, val, opts)
+      val
+    end
+  end
 
   describe "POST /password/forgot" do
     it "creates a reset token and queues it for the account email" do
@@ -33,19 +45,39 @@ RSpec.describe "Password recovery", type: :request do
       expect(response_status["error"]).to eq(I18n.t("auth.account_discarded"))
       expect(NotificationService::Center).not_to have_received(:password_reset_email)
     end
+
+    it "enforces cooldown on consecutive password reset requests" do
+      user = create(:user)
+      post "/password/forgot", params: { email: user.email }
+      expect(response).to have_http_status(:ok)
+
+      post "/password/forgot", params: { email: user.email }
+      expect(response).to have_http_status(:too_many_requests)
+      expect(response_status["message"]).to include("We've sent an email. Please wait")
+      expect(response_meta["cooldown_remaining"]).to be_present
+    end
   end
 
   describe "PUT /password/reset" do
     let(:user) { create(:user) }
     let(:raw_token) { user.send_reset_password_instructions }
 
-    it "changes the password with a valid token" do
+    it "changes the password with a valid token, rotating JTI and invalidating active sessions" do
+      old_jti = user.jti
+      allow(SocketService::Client).to receive(:broadcast)
+
       put "/password/reset", params: {
         user: { reset_password_token: raw_token, password: "newpassword", password_confirmation: "newpassword" }
       }
 
       expect(response).to have_http_status(:ok)
       expect(user.reload.valid_password?("newpassword")).to be(true)
+      expect(user.reload.jti).not_to eq(old_jti)
+      expect(SocketService::Client).to have_received(:broadcast).with(
+        user_id: user.id,
+        message: anything,
+        data: { type: NotificationConstants::NotificationType::SESSION_INVALIDATED }
+      )
     end
 
     it "rejects an invalid token, short password, and mismatched confirmation" do

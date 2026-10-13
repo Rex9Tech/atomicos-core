@@ -14,20 +14,27 @@ class Payment::SubscriptionDashboard < Administrate::BaseDashboard
     creator: Field::BelongsTo,
     current_period_end: Field::DateTime,
     current_period_start: Field::DateTime,
-    cycle: Field::Select.with_options(searchable: false, collection: ->(field) { field.resource.class.send(field.attribute.to_s.pluralize).keys }),
+    currency: Field::String,
+    payment_method_id: Field::String,
     discarded_at: Field::DateTime,
     discarded_by_id: Field::String,
     discarder: Field::BelongsTo,
     ended_at: Field::DateTime,
     metadata: Field::String.with_options(searchable: false),
     payment_method_details: Field::String.with_options(searchable: false),
-    payment_method_id: Field::String,
-    payment_method_type: Field::Select.with_options(searchable: false, collection: ->(field) { field.resource.class.send(field.attribute.to_s.pluralize).keys }),
+    payment_method_type: Field::String,
     product: Field::BelongsTo,
+    quantity: Field::Number,
+    interval: Field::String,
+    interval_count: Field::Number,
     started_at: Field::DateTime,
     status: Field::Select.with_options(searchable: false, collection: ->(field) { field.resource.class.send(field.attribute.to_s.pluralize).keys }),
-    stripe_customer_id: Field::String,
-    stripe_subscription_id: Field::String,
+    provider: Field::String,
+    provider_subscription_id: Field::String,
+    provider_subscription_item_id: Field::String,
+    provider_price_id: Field::String,
+    provider_customer_id: Field::String,
+    unit_amount: Field::Number,
     undiscarded_at: Field::DateTime,
     undiscarded_by_id: Field::String,
     undiscarder: Field::BelongsTo,
@@ -46,7 +53,8 @@ class Payment::SubscriptionDashboard < Administrate::BaseDashboard
   COLLECTION_ATTRIBUTES = %i[
     current_period_start
     current_period_end
-    cycle
+    interval
+    unit_amount
     product
     user
     status
@@ -61,7 +69,11 @@ class Payment::SubscriptionDashboard < Administrate::BaseDashboard
     creator
     current_period_end
     current_period_start
-    cycle
+    currency
+    unit_amount
+    quantity
+    interval
+    interval_count
     discarded_at
     discarded_by_id
     discarder
@@ -73,8 +85,11 @@ class Payment::SubscriptionDashboard < Administrate::BaseDashboard
     product
     started_at
     status
-    stripe_customer_id
-    stripe_subscription_id
+    provider
+    provider_subscription_id
+    provider_subscription_item_id
+    provider_price_id
+    provider_customer_id
     undiscarded_at
     undiscarded_by_id
     undiscarder
@@ -94,7 +109,11 @@ class Payment::SubscriptionDashboard < Administrate::BaseDashboard
     creator
     current_period_end
     current_period_start
-    cycle
+    currency
+    unit_amount
+    quantity
+    interval
+    interval_count
     discarded_at
     discarded_by_id
     discarder
@@ -106,8 +125,11 @@ class Payment::SubscriptionDashboard < Administrate::BaseDashboard
     product
     started_at
     status
-    stripe_customer_id
-    stripe_subscription_id
+    provider
+    provider_subscription_id
+    provider_subscription_item_id
+    provider_price_id
+    provider_customer_id
     undiscarded_at
     undiscarded_by_id
     undiscarder

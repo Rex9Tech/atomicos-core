@@ -220,14 +220,7 @@ RailsPulse.configure do |config|
 
   # Example 4: Basic HTTP authentication
   config.authentication_method = proc {
-    authenticate_or_request_with_http_basic("Admin Area") do |username, password|
-      user = User.find_by(username: username)
-      # Check if user exists, password is valid, and user is admin
-      user&.valid_password?(password) && user.admin?
-    end
-    # authenticate_or_request_with_http_basic do |username, password|
-    #   username == ENV['RAILS_PULSE_USERNAME'] && password == ENV['RAILS_PULSE_PASSWORD']
-    # end
+    AdminAuthService.http_basic_authenticate(self)
   }
 
   # Example 5: Custom authorization check
@@ -278,17 +271,17 @@ RailsPulse.configure do |config|
   # Enable or disable automatic data cleanup
   config.archiving_enabled = true
 
-  # Time-based retention - delete records older than this period
-  config.full_retention_period = 2.weeks # NOTE: Maybe 30 days?
+  # Time-based retention - delete records older than this period (1 month)
+  config.full_retention_period = 1.month
 
   # Count-based retention - maximum records to keep per table
   # After time-based cleanup, if tables still exceed these limits,
   # the oldest remaining records will be deleted to stay under the limit
   config.max_table_records = {
-    rails_pulse_requests: 10000,    # HTTP requests (moderate volume)
-    rails_pulse_operations: 50000,  # Operations within requests (high volume)
-    rails_pulse_routes: 1000,       # Unique routes (low volume)
-    rails_pulse_queries: 500        # Normalized SQL queries (low volume)
+    rails_pulse_requests: 50000,    # HTTP requests (moderate volume)
+    rails_pulse_operations: 250000, # Operations within requests (high volume)
+    rails_pulse_routes: 2500,       # Unique routes (low volume)
+    rails_pulse_queries: 1500       # Normalized SQL queries (low volume)
   }
 
   # Which requests to ignore (optional)

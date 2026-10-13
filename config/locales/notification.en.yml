@@ -6,10 +6,10 @@ en:
         body: "We have an important announcement for you."
       maintenance_notice:
         title: "Scheduled maintenance"
-        body: "Rexone will be temporarily unavailable during scheduled maintenance."
+        body: "RexOne will be temporarily unavailable during scheduled maintenance."
       feature_update:
         title: "New feature available"
-        body: "A new Rexone feature is now available."
+        body: "A new RexOne feature is now available."
     queued: "Notification delivery queued."
     recipients_fetched: "Notification recipients fetched."
     templates_fetched: "Notification templates fetched."
@@ -35,6 +35,9 @@ en:
     sign_in_alert:
       title: "New Sign In"
       body: "Hi %{name}, we noticed a new sign-in to your account."
+    iam_updated:
+      title: "Your access has changed"
+      body: "Your roles and permissions have been updated. Please sign in again."
     notifications_fetched: "Notifications fetched successfully."
     unread_count_fetched: "Unread notification count fetched."
     marked_as_read: "Notification marked as read."
@@ -49,4 +52,8 @@ en:
     notification_updated: "Notification updated successfully."
     notification_discarded: "Notification moved to recycle bin."
     notification_undiscarded: "Notification restored."
-
+    batch_discarded: "Selected notifications moved to recycle bin."
+    batch_restored: "Selected notifications restored."
+    batch_deleted: "Selected notifications permanently deleted."
+    recycle_bin_emptied: "Recycle bin emptied."
+    no_notifications_selected: "No notifications selected."

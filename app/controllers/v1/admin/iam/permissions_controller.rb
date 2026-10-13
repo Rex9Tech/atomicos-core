@@ -1,17 +1,45 @@
 # app/controllers/v1/admin/iam/permissions_controller.rb
 class V1::Admin::Iam::PermissionsController < V1::ApplicationController
   before_action :super_admin_required!
-  before_action :set_permission, only: %i[show update destroy]
+  before_action :set_active_permission, only: %i[show update discard]
+  before_action :set_permission_including_discarded, only: %i[undiscard destroy]
 
   # GET /v1/admin/iam/permissions
   def index
-    permissions = ::Iam::Permission.order(:resource, :action)
-    pagy, records = pagy(permissions)
+    filters = index_params
+    permissions = if filters[:discarded].to_s == "true"
+      ::Iam::Permission.with_discarded.discarded.order(:resource, :action)
+    else
+      ::Iam::Permission.order(:resource, :action)
+    end
+    pagy, records = pagy(permissions, limit: filters[:limit])
     render_json_response(
       status_code: 200,
       message: iam_message(MessageService::Iam::PERMISSIONS_FETCHED),
-      data: ::Iam::PermissionSerializer.paginated(records, pagy),
-      pagy: pagy
+      **::Iam::PermissionSerializer.collection_pagy(records, pagy)
+    )
+  end
+
+  # POST /v1/admin/iam/permissions/:id/discard
+  def discard
+    @permission.discard!
+    notify_assigned_users(@permission)
+
+    render_json_response(
+      status_code: 200,
+      message: iam_message(MessageService::Iam::PERMISSION_DISCARDED)
+    )
+  end
+
+  # POST /v1/admin/iam/permissions/:id/undiscard
+  def undiscard
+    @permission.undiscard!
+    notify_assigned_users(@permission)
+
+    render_json_response(
+      status_code: 200,
+      message: iam_message(MessageService::Iam::PERMISSION_RESTORED),
+      data: ::Iam::PermissionSerializer.record(@permission)
     )
   end
 
@@ -20,7 +48,7 @@ class V1::Admin::Iam::PermissionsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: iam_message(MessageService::Iam::PERMISSION_FETCHED),
-      data: ::Iam::PermissionSerializer.new(@permission).serializable_hash[:data][:attributes]
+      data: ::Iam::PermissionSerializer.record(@permission)
     )
   end
 
@@ -33,7 +61,7 @@ class V1::Admin::Iam::PermissionsController < V1::ApplicationController
       render_json_response(
         status_code: 201,
         message: iam_message(MessageService::Iam::PERMISSION_CREATED),
-        data: ::Iam::PermissionSerializer.new(permission).serializable_hash[:data][:attributes]
+        data: ::Iam::PermissionSerializer.record(permission)
       )
     else
       render_json_response(
@@ -50,10 +78,12 @@ class V1::Admin::Iam::PermissionsController < V1::ApplicationController
     set_permission_name(@permission)
 
     if @permission.save
+      notify_assigned_users(@permission)
+
       render_json_response(
         status_code: 200,
         message: iam_message(MessageService::Iam::PERMISSION_UPDATED),
-        data: ::Iam::PermissionSerializer.new(@permission).serializable_hash[:data][:attributes]
+        data: ::Iam::PermissionSerializer.record(@permission)
       )
     else
       render_json_response(
@@ -66,7 +96,24 @@ class V1::Admin::Iam::PermissionsController < V1::ApplicationController
 
   # DELETE /v1/admin/iam/permissions/:id
   def destroy
-    @permission.destroy
+    unless @permission.discarded?
+      message = iam_message(MessageService::Iam::PERMISSION_NOT_DISCARDED)
+      render_json_response(status_code: 422, message: message, error: message)
+      return
+    end
+
+    affected_users = users_for_permission(@permission)
+
+    unless @permission.destroy
+      render_json_response(
+        status_code: 422,
+        message: iam_message(MessageService::Iam::PERMISSION_DELETE_FAILED),
+        error: @permission.errors.full_messages.to_sentence
+      )
+      return
+    end
+
+    notify_users(affected_users)
 
     render_json_response(
       status_code: 200,
@@ -76,8 +123,16 @@ class V1::Admin::Iam::PermissionsController < V1::ApplicationController
 
   private
 
-  def set_permission
-    @permission = ::Iam::Permission.find(params[:id])
+  def index_params
+    params.permit(:discarded, :limit, :page)
+  end
+
+  def set_active_permission
+    @permission = ::Iam::Permission.find(params.permit(:id)[:id])
+  end
+
+  def set_permission_including_discarded
+    @permission = ::Iam::Permission.with_discarded.find(params.permit(:id)[:id])
   end
 
   def permission_params
@@ -92,5 +147,23 @@ class V1::Admin::Iam::PermissionsController < V1::ApplicationController
 
   def iam_message(key, **options)
     MessageService::Iam.t(key, **options)
+  end
+
+  def users_for_permission(permission)
+    User.joins(user_roles: { role: :role_permissions })
+        .where(iam_role_permissions: { permission_id: permission.id })
+        .distinct
+        .to_a
+  end
+
+  def notify_assigned_users(permission)
+    notify_users(users_for_permission(permission))
+  end
+
+  def notify_users(users)
+    users.each do |user|
+      user.update_column(:jti, SecureRandom.uuid) unless user.id == current_user&.id
+      NotificationService::Center.iam_updated(user)
+    end
   end
 end

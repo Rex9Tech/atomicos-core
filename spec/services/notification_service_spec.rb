@@ -12,7 +12,12 @@ RSpec.describe NotificationService::Center do
     expect(result).to eq(socket: true)
     expect(Notification::DeliverJob).to have_been_enqueued.with(
       channel: :socket,
-      payload: { user_id: "user-id", message: "Message", data: { type: "custom" } }
+      payload: {
+        user_id: "user-id",
+        message: "Message",
+        clients: NotificationConstants::Client::DEFAULT,
+        data: { type: "custom" }
+      }
     )
   end
 
@@ -20,6 +25,49 @@ RSpec.describe NotificationService::Center do
     expect do
       described_class.notify(user_id: "user-id", message: "Body", send_push: true)
     end.not_to have_enqueued_job(Notification::DeliverJob)
+  end
+
+  it "keeps admin portal operations on Web and does not send a mobile push" do
+    user = create(:user)
+
+    described_class.notify(
+      user_id: user.id,
+      title: "Asset ready",
+      message: "Asset ready",
+      link: "/admin/assets/asset-id",
+      send_socket: true,
+      send_push: true
+    )
+
+    expect(user.user_notifications.last.clients).to eq(NotificationConstants::Client::ADMIN_PORTAL)
+    expect(Notification::DeliverJob).to have_been_enqueued.with(
+      channel: :socket,
+      payload: hash_including(clients: NotificationConstants::Client::ADMIN_PORTAL)
+    )
+    expect(Notification::DeliverJob).not_to have_been_enqueued.with(channel: :push, payload: anything)
+  end
+
+  it "persists every push and sends its user notification id to the client" do
+    user = create(:user)
+
+    expect do
+      described_class.notify(
+        user_id: user.id,
+        title: "Title",
+        message: "Body",
+        send_push: true
+      )
+    end.to change(user.user_notifications, :count).by(1)
+
+    notification = user.user_notifications.last
+    expect(Notification::DeliverJob).to have_been_enqueued.with(
+      channel: :push,
+      payload: hash_including(
+        data: hash_including(
+          AnalyticsConstants::Parameter::NOTIFICATION_ID => notification.id
+        )
+      )
+    )
   end
 
   it "resolves an email address lazily and applies plain defaults" do
@@ -47,6 +95,33 @@ RSpec.describe NotificationService::Center do
     expect(described_class.email(email: "user@example.com", subject: "Hi", body: "Body")).to be(false)
   end
 
+  it "updates one persisted notification throughout an async operation lifecycle" do
+    user = create(:user)
+    attributes = {
+      user_id: user.id,
+      operation_id: "ai_response:message-id",
+      operation_type: NotificationConstants::OperationType::AI_RESPONSE,
+      link: "/ai?room_id=room-id",
+      message: "Working"
+    }
+
+    described_class.operation(
+      **attributes,
+      operation_status: NotificationConstants::OperationStatus::PROCESSING
+    )
+    described_class.operation(
+      **attributes.merge(message: "Ready"),
+      operation_status: NotificationConstants::OperationStatus::COMPLETED
+    )
+
+    expect(user.user_notifications.count).to eq(1)
+    expect(user.user_notifications.first).to have_attributes(
+      message: "Ready",
+      operation_status: NotificationConstants::OperationStatus::COMPLETED,
+      link: "/ai?room_id=room-id"
+    )
+  end
+
   it "creates confirmation and password-reset email jobs" do
     described_class.confirmation_email(email: "user@example.com", code: "123456")
     described_class.password_reset_email(email: "user@example.com", token: "token")
@@ -56,8 +131,8 @@ RSpec.describe NotificationService::Center do
   it "fans payment success out to socket, push, and template email" do
     user = create(:user)
     product = create(:payment_product)
-    transaction = create(:payment_transaction, user: user, product: product, paid_at: Time.current)
-    described_class.payment_success(user, product, transaction)
+    purchase = create(:payment_purchase, user: user, product: product, paid_at: Time.current)
+    described_class.payment_success(user, product, purchase)
     expect(Notification::DeliverJob).to have_been_enqueued.exactly(:thrice)
   end
 
@@ -98,13 +173,29 @@ RSpec.describe NotificationService::Center do
 
     it "creates a welcome notification for new users" do
       expect do
-        described_class.welcome(user_id: user.id, name: user.name)
+        described_class.welcome(user)
       end.to change(user.user_notifications, :count).by(1)
+    end
+
+    it "delivers an HTTPS link configured on the template" do
+      external_link = "https://example.com/welcome"
+      create(
+        :notification,
+        event: NotificationConstants::NotificationType::WELCOME,
+        link: external_link
+      )
+
+      described_class.welcome(user)
+
+      expect(Notification::DeliverJob).to have_been_enqueued.with(
+        channel: :socket,
+        payload: hash_including(link: external_link)
+      )
     end
 
     it "safely returns if user is nil" do
       expect do
-        described_class.welcome(user_id: "non-existent-id", name: "Ghost")
+        described_class.welcome("non-existent-id")
       end.not_to raise_error
     end
   end

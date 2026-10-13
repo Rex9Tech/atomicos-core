@@ -8,6 +8,9 @@ RSpec.describe Asset, type: :model do
   it "requires valid HTTP URLs and supported metadata" do
     expect(build(:asset, url: "testing.com")).not_to be_valid
     expect(build(:asset, type: "invalid_type")).not_to be_valid
+    expect(build(:asset, type: "audio", format: "audio")).not_to be_valid
+    expect(build(:asset, type: "video", format: "video")).not_to be_valid
+    expect(build(:asset, type: "general", format: "audio")).to be_valid
     expect(build(:asset, format: "archive")).not_to be_valid
     expect(build(:asset, source: "unknown")).not_to be_valid
     expect(build(:asset, size_bytes: -1)).not_to be_valid
@@ -19,6 +22,30 @@ RSpec.describe Asset, type: :model do
     expect(build(:asset, source: "google", storage_key: nil)).to be_valid
   end
 
+  it "defaults title to name when title is not provided" do
+    asset = build(:asset, name: "my_recording.mp3", title: nil)
+    asset.validate
+    expect(asset.title).to eq("my_recording.mp3")
+  end
+
+  it "preserves custom title and allows optional description" do
+    asset = build(:asset, name: "system_generated_uuid.png", title: "Profile Photo", description: "User primary avatar")
+    asset.validate
+    expect(asset.title).to eq("Profile Photo")
+    expect(asset.description).to eq("User primary avatar")
+  end
+
+  it "falls back to name when title is updated to blank" do
+    asset = create(:asset, name: "document.pdf", title: "Original Display Name")
+    asset.update!(title: "")
+    expect(asset.title).to eq("document.pdf")
+  end
+
+  it "supports arbitrary jsonb metadata defaulting to empty hash" do
+    asset = create(:asset, metadata: { "width" => 1920, "height" => 1080 })
+    expect(asset.reload.metadata).to eq({ "width" => 1920, "height" => 1080 })
+  end
+
   it "infers extension and format from the URL and keeps unclassified as nil" do
     asset = build(:asset, url: "https://example.com/report.pdf", format: nil)
     asset.validate
@@ -27,6 +54,10 @@ RSpec.describe Asset, type: :model do
     audio_asset = build(:asset, url: "https://example.com/meditation.mp3", format: nil)
     audio_asset.validate
     expect(audio_asset).to have_attributes(extension: "mp3", format: "audio")
+
+    subtitle_asset = build(:asset, url: "https://example.com/captions.srt", format: nil, type: "subtitle")
+    subtitle_asset.validate
+    expect(subtitle_asset).to have_attributes(extension: "srt", format: "subtitle")
 
     unclassified = build(:asset, url: "https://example.com/archive.bin", format: nil)
     unclassified.validate
@@ -121,19 +152,130 @@ RSpec.describe Asset, type: :model do
     it "identifies compressible formats accurately" do
       video = build(:asset, extension: "mp4")
       image = build(:asset, extension: "png")
+      audio = build(:asset, extension: "wav", type: "general")
       doc = build(:asset, extension: "pdf")
       optimal_image = build(:asset, extension: "png", status: "optimal")
 
       expect(video.compressible_video?).to be(true)
       expect(video.compressible_image?).to be(false)
+      expect(video.compressible_audio?).to be(false)
       expect(video.compressible?).to be(true)
 
       expect(image.compressible_video?).to be(false)
       expect(image.compressible_image?).to be(true)
+      expect(image.compressible_audio?).to be(false)
       expect(image.compressible?).to be(true)
+
+      webp = build(:asset, extension: "webp", format: "image")
+      expect(webp.compressible_image?).to be(true)
+      expect(webp.compressible?).to be(true)
+
+      svg = build(:asset, extension: "svg", format: "image")
+      expect(svg.compressible_image?).to be(false)
+      expect(svg.compressible?).to be(false)
+
+      expect(audio.compressible_audio?).to be(true)
+      expect(audio.compressible_video?).to be(false)
+      expect(audio.compressible?).to be(true)
 
       expect(doc.compressible?).to be(false)
       expect(optimal_image.compressible?).to be(false)
+
+      expect(video.thumbnail_attachable?).to be(true)
+      expect(video.subtitle_attachable?).to be(true)
+      expect(audio.thumbnail_attachable?).to be(true)
+      expect(audio.subtitle_attachable?).to be(true)
+      expect(image.thumbnail_attachable?).to be(false)
+      expect(image.subtitle_attachable?).to be(false)
+      expect(doc.thumbnail_attachable?).to be(false)
+      expect(doc.subtitle_attachable?).to be(false)
+    end
+
+    it "allows one thumbnail and multiple subtitle children on the same parent" do
+      parent = create(:asset, type: "general", format: "video", extension: "mp4", url: "https://example.com/parent.mp4")
+      thumbnail = create(
+        :asset,
+        type: "thumbnail",
+        format: "image",
+        extension: "webp",
+        parent_asset: parent,
+        url: "https://example.com/parent_thumb.webp"
+      )
+      subtitle = create(
+        :asset,
+        type: "subtitle",
+        format: "subtitle",
+        extension: "srt",
+        parent_asset: parent,
+        url: "https://example.com/parent.srt"
+      )
+      second_subtitle = create(
+        :asset,
+        type: "subtitle",
+        format: "subtitle",
+        extension: "srt",
+        parent_asset: parent,
+        url: "https://example.com/parent_my.srt"
+      )
+
+      expect(parent.reload.thumbnail).to eq(thumbnail)
+      expect(parent.subtitles).to contain_exactly(subtitle, second_subtitle)
+    end
+
+    it "rejects a second thumbnail but allows multiple subtitles on the same parent" do
+      parent = create(:asset, type: "general", format: "video", extension: "mp4", url: "https://example.com/parent.mp4")
+      create(
+        :asset,
+        type: "thumbnail",
+        format: "image",
+        extension: "webp",
+        parent_asset: parent,
+        url: "https://example.com/parent_thumb.webp"
+      )
+      create(
+        :asset,
+        type: "subtitle",
+        format: "subtitle",
+        extension: "srt",
+        parent_asset: parent,
+        url: "https://example.com/parent.srt"
+      )
+
+      duplicate_thumbnail = build(
+        :asset,
+        type: "thumbnail",
+        format: "image",
+        extension: "webp",
+        parent_asset: parent,
+        url: "https://example.com/parent_thumb_2.webp"
+      )
+      another_subtitle = build(
+        :asset,
+        type: "subtitle",
+        format: "subtitle",
+        extension: "srt",
+        parent_asset: parent,
+        url: "https://example.com/parent_2.srt"
+      )
+
+      expect(duplicate_thumbnail).not_to be_valid
+      expect(another_subtitle).to be_valid
+    end
+
+    it "prevents changing the type of a child asset on update" do
+      parent = create(:asset, type: "general", format: "video", extension: "mp4", url: "https://example.com/parent_video.mp4")
+      child = create(
+        :asset,
+        type: "thumbnail",
+        format: "image",
+        extension: "webp",
+        parent_asset: parent,
+        url: "https://example.com/parent_thumb_3.webp"
+      )
+
+      child.type = "general"
+      expect(child).not_to be_valid
+      expect(child.errors[:type]).to include("Child asset type cannot be changed")
     end
 
     it "filters assets via ready, processing, optimal, and failed scopes" do

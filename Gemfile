@@ -5,6 +5,8 @@ source "https://rubygems.org"
 # ============================================================
 
 gem "psych", "~> 5.5.0"
+# json 3.0 made JSON.parse keyword-only; Rails 8.1.3 still passes a positional options hash.
+gem "json", "< 3.0" # Don't update this one here, it's for JSON.parse compat with Rails 8.1.3.1
 # Bundle edge Rails instead: gem "rails", github: "rails/rails", branch: "main"
 gem "rails", "~> 8.1.3"
 # Use postgresql as the database for Active Record
@@ -25,7 +27,7 @@ gem "tzinfo-data", platforms: %i[ windows jruby ]
 gem "solid_cache"
 gem "solid_queue"
 gem "solid_cable"
-gem "async", "~> 2.45"
+gem "async", "~> 2.46"
 
 # ============================================================
 # Performance / Deployment
@@ -56,8 +58,8 @@ gem "sprockets-rails", "~> 3.5"
 gem "sassc-rails", "~> 2.1"
 gem "csv", "~> 3.3"
 
-gem "rails_pulse", "~> 0.3.3"
-gem "rails_error_dashboard", "~> 0.11.1" # Alternatives: rails_error_dashboard, faultline, https://github.com/dkam/splat
+gem "rails_pulse", "~> 0.4.2"
+gem "rails_error_dashboard", "~> 0.14.4" # Alternatives: rails_error_dashboard, faultline, https://github.com/dkam/splat
 gem "solid_web_ui", "~> 0.4.0" # Alternatives: mission_control-jobs, solid_observer, solid_queue_monitor
 
 # ============================================================
@@ -68,7 +70,7 @@ gem "solid_web_ui", "~> 0.4.0" # Alternatives: mission_control-jobs, solid_obser
 gem "bcrypt", "~> 3.1"
 gem "devise", "~> 5.0"
 gem "devise-jwt", "~> 0.13.0"
-gem "jwt", "~> 3.2"
+gem "jwt", "~> 3.3"
 
 # ============================================================
 # API / Serialization
@@ -91,15 +93,15 @@ gem "rack-attack", "~> 6.8"
 # ============================================================
 
 gem "cloudinary", "~> 2.4"
-gem "stripe", "~> 19.6"
+gem "stripe", "~> 20.0"
 gem "websocket-client-simple", "~> 0.9"
-gem "aws-sdk-s3", "~> 1.0" # need only when STORAGE_PROVIDER=garage
+gem "aws-sdk-s3", "~> 1.233.1" # need only when STORAGE_PROVIDER=garage
 
 # ============================================================
 # Utilities
 # ============================================================
 
-gem "pagy", "~> 43.6"
+gem "pagy", "~> 43.7"
 
 # ============================================================
 # Development / Test

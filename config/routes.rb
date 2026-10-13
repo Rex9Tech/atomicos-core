@@ -17,9 +17,14 @@ Rails.application.routes.draw do
   get "up", to: "rails/health#show", as: :rails_health_check
   # get "up" => "rails/health#show", as: :rails_health_check
 
-  # ===== API DOCS - RSWAG =====
-  mount Rswag::Ui::Engine => "/api-docs"
-  mount Rswag::Api::Engine => "/api-docs"
+  # ===== API DOCS - RSWAG (Admin HTTP Basic Auth Protected) =====
+  mount Rack::Auth::Basic.new(Rswag::Ui::Engine, "Admin Area") { |u, p|
+    AdminAuthService.authenticate(username: u, password: p).present?
+  } => "/admin/api-docs"
+
+  mount Rack::Auth::Basic.new(Rswag::Api::Engine, "Admin Area") { |u, p|
+    AdminAuthService.authenticate(username: u, password: p).present?
+  } => "/admin/api-docs"
 
   # ===== RAILS PULSE PERFORMANCE =====
   mount RailsPulse::Engine => "/admin/pulse"
@@ -58,7 +63,9 @@ Rails.application.routes.draw do
     namespace :payment do
       resources :products, only: %i[index show new create edit update destroy]
       resources :subscriptions, only: %i[index show new create edit update destroy]
-      resources :transactions, only: %i[index show new create edit update destroy]
+      resources :purchases, only: %i[index show new create edit update destroy]
+      resources :coupons, only: %i[index show new create edit update destroy]
+      resources :user_coupons, only: %i[index show new create edit update destroy]
       resources :webhook_events, only: %i[index show]
     end
 
@@ -67,7 +74,13 @@ Rails.application.routes.draw do
       resources :messages, only: %i[index show new create edit update destroy]
     end
 
+    namespace :ai do
+      resources :profiles, only: %i[index show new create edit update destroy]
+      resources :runs, only: %i[index show destroy]
+    end
+
     resources :notifications, only: %i[index show new create edit update destroy]
+    resources :user_notifications, only: %i[index show new create edit update destroy]
 
     root to: "users#index"
   end
@@ -122,9 +135,11 @@ Rails.application.routes.draw do
     end
 
     # ===== USERS =====
-    get "users/current", to: "users#read_current_user"
-    get "users/current/iam", to: "users#read_current_iam"
-    put "users/current", to: "users#update_current_user"
+    scope :users, controller: :users do
+      get :current, action: :read_current_user
+      put :current, action: :update_current_user
+      delete :current, action: :discard_current_user
+    end
 
     # ===== ADMIN API =====
     # React Admin Dashboard.
@@ -133,7 +148,6 @@ Rails.application.routes.draw do
       # API-only: no new/edit needed
       resources :assets, only: %i[index show update destroy] do
         collection do
-          get :read_discarded, path: "discarded"
           post :create_upload, path: "upload"
           get :read_storage_stats, path: "storage_stats"
           delete :destroy_bin, path: "bin"
@@ -148,12 +162,12 @@ Rails.application.routes.draw do
           get :read_download, path: "download"
           post :update_thumbnail_regenerate, path: "thumbnail/regenerate"
           post :update_thumbnail_upload, path: "thumbnail/upload"
+          post :update_subtitle_upload, path: "subtitle/upload"
         end
       end
 
       resources :users, only: %i[index show create update] do
         collection do
-          get :read_discarded, path: "discarded"
         end
 
         member do
@@ -163,12 +177,22 @@ Rails.application.routes.draw do
       end
 
       namespace :iam do
-        resources :permissions, only: %i[index show create update destroy]
+        resources :permissions, only: %i[index show create update destroy] do
+          member do
+            post :discard
+            post :undiscard
+          end
+        end
         resources :roles, only: %i[index show create update destroy] do
           member do
             post :discard
             post :undiscard
           end
+          resources :users, only: %i[index create destroy], param: :user_id, controller: "user_roles"
+        end
+
+        resources :users, only: [] do
+          resources :roles, only: %i[index create destroy], param: :role_id, controller: "user_roles"
         end
       end
 
@@ -187,10 +211,14 @@ Rails.application.routes.draw do
         end
       end
 
+      namespace :ai do
+        resources :profiles, only: %i[index show create update]
+        resources :runs, only: %i[index show]
+      end
+
       namespace :payment do
         resources :products, only: %i[index show create update] do
           collection do
-            get :read_discarded, path: "discarded"
           end
 
           member do
@@ -198,6 +226,27 @@ Rails.application.routes.draw do
             post :undiscard
           end
         end
+
+        resources :purchases, only: %i[index show]
+        resources :subscriptions, only: %i[index show]
+
+        resources :coupons, only: %i[index show create update destroy] do
+          collection do
+            post :create_batch, path: "batch"
+            delete :destroy_bin, path: "bin"
+            post :discard_batch
+            post :undiscard_batch
+            post :destroy_batch
+          end
+
+          member do
+            post :discard
+            post :undiscard
+            get :read_redemptions, path: "redemptions"
+          end
+        end
+
+        resources :user_coupons, only: %i[index show]
       end
 
       resources :notifications do
@@ -209,21 +258,26 @@ Rails.application.routes.draw do
         end
       end
 
-      resources :accesses, only: %i[index show create update destroy]
-
-      resources :feedbacks, only: %i[index show update destroy]
-
-      resources :categories, only: %i[index create update destroy] do
+      resources :user_notifications, only: %i[index show destroy] do
+        collection do
+          delete :destroy_bin, path: "bin"
+          post :discard_batch
+          post :undiscard_batch
+          post :destroy_batch
+        end
         member do
           post :discard
           post :undiscard
         end
       end
 
+      resources :accesses, only: %i[index show create update destroy]
+
+      resources :feedbacks, only: %i[index show update destroy]
+
       namespace :client do
         resources :versions, only: %i[index show create update] do
           collection do
-            get :read_discarded, path: "discarded"
             get "user_versions", to: "user_versions#index"
           end
 
@@ -252,9 +306,8 @@ Rails.application.routes.draw do
     # ===== FEEDBACK =====
     resources :feedbacks, only: %i[create index show]
 
-    # ===== IAM =====
+    # ===== IAM (Current User) =====
     namespace :iam do
-      # API-only: no new/edit
       resources :permissions, only: [] do
         collection do
           get :read_current_permissions, path: "current"
@@ -266,17 +319,19 @@ Rails.application.routes.draw do
           get :read_current_roles, path: "current"
         end
       end
-
-      resources :users, only: [] do
-        resources :roles,
-          only: %i[index create destroy],
-          controller: "user_roles"
-      end
     end
 
     # ===== ASSETS / MEDIA =====
-    post "media/upload", to: "assets#create_upload"
-    resources :assets, only: %i[index show create update destroy]
+    resources :assets, only: %i[index show create update destroy] do
+      collection do
+        post :create_upload, path: "upload"
+      end
+
+      member do
+        get :read_playback, path: "playback"
+        get "subtitles/:subtitle_id", to: "assets#read_subtitle", as: :subtitle
+      end
+    end
 
     # ===== PAYMENTS - CLIENT =====
     namespace :payment do
@@ -289,7 +344,7 @@ Rails.application.routes.draw do
         end
       end
 
-      resources :transactions, only: %i[index show] do
+      resources :purchases, only: %i[index show] do
         collection do
           get :read_recent, path: "recent"
         end
@@ -297,6 +352,8 @@ Rails.application.routes.draw do
 
       post "session", to: "payments#create"
       get "session/:session_id", to: "payments#read_status"
+      post "verify", to: "payments#create_verify"
+      post "coupons/validate", to: "coupons#validate_coupon"
     end
 
     # ===== ACCESSES =====
@@ -307,22 +364,15 @@ Rails.application.routes.draw do
       end
     end
 
-    # ===== AI =====
-    post "ai/chat", to: "ai#create_chat"
-    get "ai/history", to: "ai#read_history"
-    delete "ai/clear", to: "ai#destroy_clear"
-    put "ai/rename", to: "ai#update_rename"
-
-    get "ai/rooms", to: "ai#read_rooms"
-    post "ai/rooms", to: "ai#create_room"
-    delete "ai/rooms/:id", to: "ai#destroy_room"
-
-    post "ai/summarize", to: "ai#create_summarize"
-    post "ai/translate", to: "ai#create_translate"
-    post "ai/analyze", to: "ai#create_analyze"
-    post "ai/decisions", to: "ai#create_decisions"
-    post "ai/tasks", to: "ai#create_tasks"
-    post "ai/report", to: "ai#create_report"
+    # ===== CHAT =====
+    namespace :chat do
+      resources :rooms, only: %i[index show create update destroy]
+      resources :messages, only: %i[index show create update destroy] do
+        collection do
+          delete :destroy_all
+        end
+      end
+    end
 
     # ===== SPEECH =====
     post "speech/tts", to: "speech#create_tts"

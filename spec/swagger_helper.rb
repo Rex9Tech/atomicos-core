@@ -19,7 +19,7 @@ RSpec.configure do |config|
     'v1/swagger.yaml' => {
       openapi: '3.0.1',
       info: {
-        title: 'Rexone Core API',
+        title: 'RexOne Core API',
         version: 'v1',
         description: <<~DESCRIPTION
           Production API foundation for authentication, IAM, payments, access,
@@ -41,17 +41,24 @@ RSpec.configure do |config|
           name: 'Admin / Notifications',
           description: 'Admin notification dispatch. Requires the admin role and create_notifications permission.'
         },
+        {
+          name: 'Admin / User Notifications',
+          description: 'Admin user notification management, status filtering, and soft deletion.'
+        },
         { name: 'Admin / Accesses', description: 'Admin entitlement and access management.' },
         { name: 'Admin / IAM Permissions', description: 'Admin IAM permission operations.' },
         { name: 'Admin / IAM Roles', description: 'Admin IAM role operations.' },
         { name: 'Admin / Chat Rooms', description: 'Admin chat room operations.' },
         { name: 'Admin / Chat Messages', description: 'Admin chat message operations.' },
         { name: 'Admin / Payment Products', description: 'Admin payment product operations.' },
+        { name: 'Admin / Coupons', description: 'Admin coupon creation, batch generation, redemption auditing, and lifecycle operations.' },
+        { name: 'Admin / User Coupons', description: 'Admin coupon redemption auditing and usage inspection.' },
         { name: 'Admin / Feedbacks', description: 'Admin feedback review and triage.' },
         { name: 'Admin / Analytics', description: 'Admin analytics overview metrics and KPIs.' },
         { name: 'Admin / Assets', description: 'Admin asset management, upload, and media compression.' },
         { name: 'Admin / Versions', description: 'Super-admin only version CRUD with discard and restore.' },
         { name: 'Admin / User Versions', description: 'Super-admin only current user version snapshots.' },
+        { name: 'Admin / AI', description: 'Admin AI profile configuration, dynamic model routing, and execution run telemetry.' },
         { name: 'IAM Permissions', description: 'Super-admin permission management.' },
         { name: 'IAM Roles', description: 'Role definitions and their permission assignments.' },
         { name: 'IAM User Roles', description: 'Admin-managed role assignments for users.' },
@@ -61,6 +68,7 @@ RSpec.configure do |config|
         { name: 'Feedbacks', description: 'User feedback submission and inspection.' },
         { name: 'Assets', description: 'Asset records and management.' },
         { name: 'Media', description: 'Synchronous multipart asset upload.' },
+        { name: 'Chat', description: 'User chat rooms and real-time LLM-assisted conversation messages.' },
         { name: 'AI', description: 'Durable queued chat plus synchronous text utilities.' },
         { name: 'Speech', description: 'Text-to-speech synthesis and speech-to-text transcription.' },
         { name: 'Client Logs', description: 'Client error ingestion and authorized operational review.' },

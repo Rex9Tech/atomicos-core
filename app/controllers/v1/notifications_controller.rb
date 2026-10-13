@@ -2,28 +2,29 @@
 class V1::NotificationsController < V1::ApplicationController
   # GET /v1/notifications
   def index
-    scope = current_user.user_notifications.kept.recent
+    scope = client_notifications.recent
+    filters = index_params
 
-    case params[:filter].to_s.downcase
+    case filters[:filter].to_s.downcase
     when "unread"
       scope = scope.unread
     when "read"
       scope = scope.read_scope
     end
 
-    pagy, records = pagy(:offset, scope, limit: params[:limit] || 20)
+    limit = filters[:limit].presence || 20
+    pagy, records = pagy(:offset, scope, limit: limit)
 
     render_json_response(
       status_code: 200,
       message: notification_message(MessageService::Notification::NOTIFICATIONS_FETCHED),
-      data: UserNotificationSerializer.paginated(records, pagy),
-      pagy: pagy
+      **UserNotificationSerializer.collection_pagy(records, pagy)
     )
   end
 
   # GET /v1/notifications/unread_count
   def read_unread_count
-    count = current_user.user_notifications.kept.unread.count
+    count = client_notifications.unread.count
 
     render_json_response(
       status_code: 200,
@@ -34,19 +35,19 @@ class V1::NotificationsController < V1::ApplicationController
 
   # PUT /v1/notifications/:id/read
   def update_read
-    notification = current_user.user_notifications.kept.find(params[:id])
+    notification = client_notifications.find(params.permit(:id)[:id])
     notification.mark_as_read!
 
     render_json_response(
       status_code: 200,
       message: notification_message(MessageService::Notification::MARKED_AS_READ),
-      data: UserNotificationSerializer.new(notification).serializable_hash[:data]
+      data: UserNotificationSerializer.record(notification)
     )
   end
 
   # PUT /v1/notifications/read_all
   def update_read_all
-    unread_scope = current_user.user_notifications.kept.unread
+    unread_scope = client_notifications.unread
     counts_by_notif = unread_scope.where.not(notification_id: nil).group(:notification_id).count
     unread_scope.update_all(read_at: Time.current, updated_at: Time.current)
 
@@ -63,19 +64,32 @@ class V1::NotificationsController < V1::ApplicationController
 
   # DELETE /v1/notifications/:id
   def destroy
-    notification = current_user.user_notifications.kept.find(params[:id])
+    notification = client_notifications.find(params.permit(:id)[:id])
     notification.discard
 
     render_json_response(
       status_code: 200,
-      message: notification_message(MessageService::Notification::NOTIFICATION_DELETED),
-      data: { id: notification.id }
+      message: notification_message(MessageService::Notification::NOTIFICATION_DELETED)
     )
   end
 
   private
 
+  def client_notifications
+    current_user.user_notifications.kept.for_client(notification_client)
+  end
+
+  def notification_client
+    return NotificationConstants::Client::WEB if platform_session == AuthConstants::Platform::WEB
+
+    NotificationConstants::Client::MOBILE
+  end
+
   def notification_message(key, **options)
     MessageService::Notification.t(key, **options)
+  end
+
+  def index_params
+    params.permit(:filter, :limit, :page)
   end
 end

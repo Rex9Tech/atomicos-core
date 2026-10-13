@@ -10,7 +10,7 @@ class Auth::SessionsController < Devise::SessionsController
 
   # GET /peek?email=user@example.com
   def peek_user
-    email = params[:email].to_s.strip.downcase
+    email = peek_params[:email].to_s.strip.downcase
 
     if email.blank?
       render_json_response(
@@ -37,8 +37,8 @@ class Auth::SessionsController < Devise::SessionsController
 
   # POST /signin
   def create
-    signin_key = params.dig(:user, :signin_key).to_s.strip
-    password = params.dig(:user, :password)
+    signin_key = sign_in_params[:signin_key].to_s.strip
+    password = sign_in_params[:password]
     user = User.with_discarded.find_by(
       "email = :signin_key OR username = :signin_key",
       signin_key: signin_key
@@ -64,7 +64,7 @@ class Auth::SessionsController < Devise::SessionsController
           MessageService::Auth::TOO_MANY_ATTEMPTS_WITH_WAIT,
           seconds: limiter.cooldown_remaining
         ),
-        data: {
+        meta: {
           remaining_attempts: 0,
           cooldown_remaining: limiter.cooldown_remaining
         }
@@ -79,16 +79,13 @@ class Auth::SessionsController < Devise::SessionsController
         token = AppConfig::JWT_TOKEN.call(user)
         signup_active_session!(user: user, token: token)
 
-        NotificationService::Center.sign_in_alert(
-          user_id: user.id,
-          name: user.name || user.username
-        )
+        NotificationService::Center.sign_in_alert(user)
 
         render_json_response(
           status_code: 200,
           message: auth_message(MessageService::Auth::SIGNED_IN),
-          data: {
-            user: UserSerializer.new(user).serializable_hash[:data][:attributes],
+          data: UserSerializer.record(user),
+          meta: {
             token: token
           }
         )
@@ -101,7 +98,7 @@ class Auth::SessionsController < Devise::SessionsController
             MessageService::Auth::CONFIRMATION_EMAIL_QUEUED,
             email: user.email
           ),
-          data: { otp_sent: true }
+          meta: { otp_sent: true }
         )
       end
     else
@@ -114,7 +111,7 @@ class Auth::SessionsController < Devise::SessionsController
         error: is_cooldown ?
           auth_message(MessageService::Auth::TOO_MANY_ATTEMPTS) :
           auth_message(MessageService::Auth::INVALID_CREDENTIALS),
-        data: {
+        meta: {
           remaining_attempts: failure_data[:remaining_attempts],
           cooldown_remaining: failure_data[:cooldown_remaining] || 0
         }
@@ -124,15 +121,16 @@ class Auth::SessionsController < Devise::SessionsController
 
   # POST /signin/token
   def token_sign_in
+    token = token_params[:token]
     user = begin
-      Warden::JWTAuth::UserDecoder.new.call(params[:token], :user, nil)
+      Warden::JWTAuth::UserDecoder.new.call(token, :user, nil)
     rescue StandardError => e
       Rails.logger.warn("#{LOG_PREFIX} Token sign in decode failed: #{e.message}")
       nil
     end
 
     if user.nil?
-      discarded_user = User.with_discarded.discarded.find_by(jti: params[:token])
+      discarded_user = User.with_discarded.discarded.find_by(jti: token)
       return if reject_discarded_account!(discarded_user)
     end
 
@@ -146,8 +144,8 @@ class Auth::SessionsController < Devise::SessionsController
       render_json_response(
         status_code: 200,
         message: auth_message(MessageService::Auth::SIGNED_IN),
-        data: {
-          user: UserSerializer.new(user).serializable_hash[:data][:attributes],
+        data: UserSerializer.record(user),
+        meta: {
           token: token
         }
       )
@@ -162,7 +160,7 @@ class Auth::SessionsController < Devise::SessionsController
 
   # POST /signin/google
   def google_sign_in
-    token = params[:token]
+    token = token_params[:token]
     user_info = GoogleAuthService.fetch_user_info(token)
 
     if !user_info || user_info["email"].blank?
@@ -184,17 +182,14 @@ class Auth::SessionsController < Devise::SessionsController
 
         token = AppConfig::JWT_TOKEN.call(user)
         signup_active_session!(user: user, token: token)
-        NotificationService::Center.sign_in_alert(
-          user_id: user.id,
-          name: user.name || user.username
-        )
+        NotificationService::Center.sign_in_alert(user)
 
         # Existing confirmed user - just return user + token
         render_json_response(
           status_code: 200,
           message: auth_message(MessageService::Auth::SIGNED_IN),
-          data: {
-            user: UserSerializer.new(user).serializable_hash[:data][:attributes],
+          data: UserSerializer.record(user),
+          meta: {
             token: token
           }
         )
@@ -216,7 +211,7 @@ class Auth::SessionsController < Devise::SessionsController
     render_json_response(
       status_code: 200,
       message: auth_message(MessageService::Auth::SET_PASSWORD),
-      data: {
+      meta: {
         password_required: true,
         challenge_token: challenge_token
       }
@@ -225,8 +220,8 @@ class Auth::SessionsController < Devise::SessionsController
 
   # POST /signin/google/complete
   def google_sign_in_complete
-    challenge_token = params[:challenge_token]
-    password = params[:password].presence
+    challenge_token = google_complete_params[:challenge_token]
+    password = google_complete_params[:password].presence
 
     if challenge_token.blank? || password.blank?
       render_json_response(
@@ -271,16 +266,13 @@ class Auth::SessionsController < Devise::SessionsController
         token = AppConfig::JWT_TOKEN.call(user)
         signup_active_session!(user: user, token: token)
 
-        NotificationService::Center.welcome(
-          user_id: user.id,
-          name: user.name || user.username
-        )
+        NotificationService::Center.welcome(user)
 
         render_json_response(
           status_code: 200,
           message: auth_message(MessageService::Auth::ACCOUNT_CREATED_AND_SIGNED_IN),
-          data: {
-            user: UserSerializer.new(user).serializable_hash[:data][:attributes],
+          data: UserSerializer.record(user),
+          meta: {
             token: token
           }
         )
@@ -344,17 +336,14 @@ class Auth::SessionsController < Devise::SessionsController
       signup_active_session!(user: user, token: token)
 
       if created_user
-        NotificationService::Center.welcome(
-          user_id: user.id,
-          name: user.name || user.username
-        )
+        NotificationService::Center.welcome(user)
       end
 
       render_json_response(
         status_code: created_user ? 201 : 200,
         message: auth_message(MessageService::Auth::ACCOUNT_CREATED_AND_SIGNED_IN),
-        data: {
-          user: UserSerializer.new(user).serializable_hash[:data][:attributes],
+        data: UserSerializer.record(user),
+        meta: {
           token: token
         }
       )
@@ -377,8 +366,8 @@ class Auth::SessionsController < Devise::SessionsController
       render_json_response(
         status_code: 200,
         message: auth_message(MessageService::Auth::SIGNED_IN),
-        data: {
-          user: UserSerializer.new(resource).serializable_hash[:data][:attributes],
+        data: UserSerializer.record(resource),
+        meta: {
           token: token
         }
       )
@@ -448,46 +437,31 @@ class Auth::SessionsController < Devise::SessionsController
 
   def save_google_profile_picture_if_missing(user, picture_url)
     return if picture_url.blank?
-    return if user.assets.exists?(type: AssetConstants::AssetType::AVATAR)
+    return if user.assets.where(type: AssetConstants::AssetType::AVATAR).where.not(storage_key: nil).exists?
 
-    storage_result = StorageService::Client.upload(
-      picture_url,
-      storage_key: AssetConstants::AssetName.google_profile(user.id),
-      folder: "user_uploads/#{AssetConstants::AssetType::AVATAR}",
-      resource_type: AssetConstants::AssetFormat::IMAGE,
-      metadata: {
-        user_id: user.id.to_s,
-        source: AssetConstants::AssetSource::GOOGLE
-      }
-    )
-
-    asset = user.assets.find_or_initialize_by(storage_key: storage_result[:storage_key])
+    asset = user.assets.find_or_initialize_by(type: AssetConstants::AssetType::AVATAR)
+    storage_key = AssetConstants::AssetName.google_profile(user.id)
     asset.assign_attributes(
-      name: AssetConstants::AssetName.google_profile(user.id),
+      name: storage_key,
       url: picture_url,
       type: AssetConstants::AssetType::AVATAR,
       format: AssetConstants::AssetFormat::IMAGE,
-      extension: storage_result[:format],
-      size_bytes: storage_result[:bytes],
       source: AssetConstants::AssetSource::GOOGLE,
-      assetable: user
+      assetable: user,
+      status: MediaConstants::Status::PENDING
     )
 
     if asset.save
       old_avatars = user.assets.where(type: AssetConstants::AssetType::AVATAR).where.not(id: asset.id)
       Asset.purge_and_destroy_all!(old_avatars)
       user.assets.reset
+      Media::ImportRemoteImageJob.perform_later(asset_id: asset.id, source_url: picture_url, storage_key: storage_key)
       return
     end
 
     Rails.logger.warn(
       "#{LOG_PREFIX} Failed to save Google profile picture " \
       "for user #{user.id}: #{asset.errors.full_messages}"
-    )
-  rescue StorageService::Error => e
-    Rails.logger.warn(
-      "#{LOG_PREFIX} Failed to upload Google profile picture " \
-      "for user #{user.id}: #{e.message}"
     )
   rescue StandardError => e
     Rails.logger.warn(
@@ -497,7 +471,7 @@ class Auth::SessionsController < Devise::SessionsController
   end
 
   def session_key_for(user_id, platform = platform_session)
-    "active_session:user:#{user_id}:#{platform}"
+    AuthConstants::Session.key(user_id, platform)
   end
 
   def signup_active_session!(user:, token:)
@@ -545,5 +519,21 @@ class Auth::SessionsController < Devise::SessionsController
     CacheService.delete(google_challenge_key(challenge_token))
   rescue => e
     Rails.logger.error("#{LOG_PREFIX} Failed to clear Google challenge: #{e.message}")
+  end
+
+  def sign_in_params
+    params.require(:user).permit(:signin_key, :password)
+  end
+
+  def peek_params
+    params.permit(:email)
+  end
+
+  def token_params
+    params.permit(:token)
+  end
+
+  def google_complete_params
+    params.permit(:challenge_token, :password)
   end
 end

@@ -3,20 +3,24 @@ class V1::Admin::Client::UserVersionsController < V1::ApplicationController
 
   # GET /v1/admin/client/versions/user_versions
   def index
+    filters = filter_params
     records = Client::UserVersion.includes(:user)
-    records = records.where(platform: params[:platform]) if params[:platform].present?
+    records = records.where(platform: filters[:platform]) if filters[:platform].present?
     records = sort(records, columns: SortConstants::Columns::USER_VERSION, default_column: :last_seen_at)
     pagy, page_records = pagy(records)
 
     render_json_response(
       status_code: 200,
       message: user_version_message(MessageService::UserVersion::FETCHED),
-      data: Client::UserVersionAdminSerializer.paginated(page_records, pagy),
-      pagy: pagy
+      **Client::UserVersionAdminSerializer.collection_pagy(page_records, pagy)
     )
   end
 
   private
+
+  def filter_params
+    params.permit(:platform)
+  end
 
   def user_version_message(key, **options)
     MessageService::UserVersion.t(key, **options)

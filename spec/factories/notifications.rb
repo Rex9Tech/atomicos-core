@@ -7,7 +7,7 @@ FactoryBot.define do
     category { NotificationConstants::Category::MARKETING }
     admin { false }
     in_app_title { "Hello {{user_name}}" }
-    in_app_body { "Welcome to Rexone!" }
+    in_app_body { "Welcome to RexOne!" }
     push_title { "Hello {{user_name}}" }
     push_body { "Push body text" }
     email_subject { "Important update for {{user_name}}" }
@@ -32,7 +32,7 @@ FactoryBot.define do
     title { "Notification Title" }
     message { "Notification Message" }
     link { "/dashboard" }
-    data { { "source" => "system" } }
+    metadata { { "source" => "system" } }
 
     trait :read do
       read_at { Time.current }

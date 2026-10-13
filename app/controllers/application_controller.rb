@@ -22,7 +22,7 @@ class ApplicationController < ActionController::API
 
   def requested_locale
     candidates = [
-      params[:locale],
+      params.permit(:locale)[:locale],
       request.headers[AuthConstants::Headers::LOCALE],
       *request.headers[AuthConstants::Headers::ACCEPT_LANGUAGE].to_s.split(",")
     ]
@@ -70,6 +70,6 @@ class ApplicationController < ActionController::API
   end
 
   def session_key(user_id)
-    "active_session:user:#{user_id}:#{platform_session}"
+    AuthConstants::Session.key(user_id, platform_session)
   end
 end

@@ -2,38 +2,49 @@
 
 class V1::Admin::AssetsController < V1::ApplicationController
   before_action :super_admin_required!, only: :read_storage_stats
-  before_action :set_active_asset, only: %i[show update discard update_compress read_download update_thumbnail_regenerate update_thumbnail_upload]
+  before_action :set_active_asset, only: %i[show update discard update_compress read_download update_thumbnail_regenerate update_thumbnail_upload update_subtitle_upload]
   before_action :set_asset_including_discarded, only: %i[undiscard destroy]
 
   # GET /v1/admin/assets
   def index
-    assets = search_assets(Asset.kept)
+    filters = filter_params
+    discarded = filters[:discarded].to_s == "true"
+    scope = discarded ? Asset.with_discarded.discarded : Asset.kept
+    scope = scope.includes(:thumbnail, :subtitles)
+    assets = search_assets(scope)
     assets = filter_assets(assets)
-    assets = sort(assets, columns: SortConstants::Columns::ASSET)
-    pagy, records = pagy(:offset, assets, limit: params[:limit])
+    assets = if discarded
+      sort(assets, columns: SortConstants::Columns::ASSET, default_column: "discarded_at")
+    else
+      sort(assets, columns: SortConstants::Columns::ASSET)
+    end
+    pagy, records = pagy(:offset, assets, limit: filters[:limit])
 
     render_json_response(
       status_code: 200,
-      message: admin_asset_message(MessageService::Admin::Asset::ASSETS_RETRIEVED),
-      data: AssetSerializer.paginated(records, pagy),
-      pagy: pagy
+      message: admin_asset_message(
+        discarded ? MessageService::Admin::Asset::DISCARDED_ASSETS_RETRIEVED : MessageService::Admin::Asset::ASSETS_RETRIEVED
+      ),
+      **AssetSerializer.collection_pagy(records, pagy)
     )
   end
 
   # GET /v1/admin/assets/:id
   def show
+    @asset.association(:thumbnail).load_target
+    @asset.association(:subtitles).load_target
+
     render_json_response(
       status_code: 200,
       message: admin_asset_message(MessageService::Admin::Asset::ASSET_RETRIEVED),
-      data: {
-        asset: AssetSerializer.new(@asset).serializable_hash[:data][:attributes]
-      }
+      data: AssetSerializer.record(@asset)
     )
   end
 
   # POST /v1/admin/assets/upload
   def create_upload
-    file = params[:file]
+    upload = upload_params
+    file = upload[:file]
 
     if file.blank?
       render_json_response(
@@ -44,13 +55,7 @@ class V1::Admin::AssetsController < V1::ApplicationController
       return
     end
 
-    max_size_mb = if determine_resource_type(file) == "video"
-                    MediaConstants::MAX_VIDEO_SIZE_MB
-    elsif determine_asset_format(file) == AssetConstants::AssetFormat::IMAGE
-                    MediaConstants::MAX_IMAGE_SIZE_MB
-    else
-                    MediaConstants::MAX_NON_VIDEO_SIZE_MB
-    end
+    max_size_mb = upload_limit_mb(file)
 
     if file.size > max_size_mb.megabytes
       render_json_response(
@@ -64,122 +69,140 @@ class V1::Admin::AssetsController < V1::ApplicationController
       return
     end
 
-    asset_type = params[:type].presence || AssetConstants::AssetType::GENERAL
-    assetable_type = params[:assetable_type].presence
-    assetable_id = params[:assetable_id].presence
-    # The file itself is the source of truth for how long it plays (see
-    # MediaService::AudioProbe) — clients may report a longer wall-clock timer.
-    duration_secs = probed_duration_secs(file) || params[:duration_secs]
+    asset_type = upload[:type].presence || AssetConstants::AssetType::GENERAL
+    assetable_type = upload[:assetable_type].presence
+    assetable_id = upload[:assetable_id].presence
+    duration_secs = upload[:duration_secs]
+    title = upload[:title].presence || (file.respond_to?(:original_filename) ? file.original_filename : nil)
+    description = upload[:description].presence
 
-    storage_key = AssetConstants::AssetName.for_admin(type: asset_type, original_filename: file.original_filename)
+    begin
+      storage_key = AssetConstants::AssetName.for_admin(type: asset_type, original_filename: file.original_filename)
 
-    result = StorageService::Client.upload(
-      file,
-      storage_key: storage_key,
-      resource_type: determine_resource_type(file),
-      metadata: {
-        user_id: current_user.id.to_s,
-        original_filename: file.original_filename
-      }
-    )
-
-    asset = Asset.find_or_initialize_by(storage_key: result[:storage_key])
-    asset.assign_attributes(
-      name: result[:storage_key],
-      url: result[:url],
-      type: asset_type,
-      format: determine_asset_format(file),
-      size_bytes: result[:bytes],
-      duration_secs: duration_secs,
-      source: AssetConstants::AssetSource::UPLOAD,
-      assetable_type: assetable_type,
-      assetable_id: assetable_id,
-      storage_key: result[:storage_key],
-      extension: result[:format] || File.extname(file.original_filename).delete("."),
-      status: compression_status_for(file)
-    )
-
-    if asset.save
-      enqueue_compression_if_needed(asset)
-
-      render_json_response(
-        status_code: 201,
-        message: admin_asset_message(MessageService::Admin::Asset::ASSET_UPLOADED),
-        data: {
-          asset: AssetSerializer.new(asset).serializable_hash[:data][:attributes],
-          storage_details: {
-            storage_key: result[:storage_key],
-            bytes: result[:bytes],
-            format: result[:format]
-          }
+      result = StorageService::Client.upload(
+        file,
+        storage_key: storage_key,
+        resource_type: determine_resource_type(file),
+        metadata: {
+          user_id: current_user.id.to_s,
+          original_filename: file.original_filename
         }
       )
-    else
-      StorageService::Client.delete(
-        result[:storage_key],
-        resource_type: result[:resource_type]
+
+      parent_asset_id = upload[:parent_asset_id].presence
+      if asset_type == AssetConstants::AssetType::THUMBNAIL && parent_asset_id.present?
+        parent = Asset.find_by(id: parent_asset_id)
+        existing_thumb = parent&.thumbnail
+        existing_thumb&.destroy!
+      end
+
+      asset = Asset.find_or_initialize_by(storage_key: result[:storage_key])
+      asset.assign_attributes(
+        name: result[:storage_key],
+        title: title,
+        description: description,
+        url: result[:url],
+        type: asset_type,
+        format: determine_asset_format(file),
+        size_bytes: result[:bytes],
+        duration_secs: duration_secs,
+        source: AssetConstants::AssetSource::UPLOAD,
+        assetable_type: assetable_type,
+        assetable_id: assetable_id,
+        parent_asset_id: parent_asset_id,
+        storage_key: result[:storage_key],
+        extension: result[:format] || File.extname(filename_for(file)).delete("."),
+        status: processing_status_for(file)
       )
 
+      if asset.save
+        enqueue_media_processing_if_needed(asset)
+
+        render_json_response(
+          status_code: 201,
+          message: admin_asset_message(MessageService::Admin::Asset::ASSET_UPLOADED),
+          data: AssetSerializer.record(asset),
+          meta: {
+            storage_details: {
+              storage_key: result[:storage_key],
+              bytes: result[:bytes],
+              format: result[:format]
+            }
+          }
+        )
+      else
+        StorageService::Client.delete(
+          result[:storage_key],
+          resource_type: result[:resource_type]
+        )
+
+        render_json_response(
+          status_code: 422,
+          message: admin_asset_message(MessageService::Admin::Asset::SAVE_FAILED),
+          error: asset.errors.full_messages.to_sentence
+        )
+      end
+    rescue StorageService::Error => e
+      Rails.error.report(e)
+      message = admin_asset_message(MessageService::Admin::Asset::STORAGE_UPLOAD_FAILED)
       render_json_response(
-        status_code: 422,
-        message: admin_asset_message(MessageService::Admin::Asset::SAVE_FAILED),
-        error: asset.errors.full_messages.to_sentence
+        status_code: 500,
+        message: message,
+        error: message
       )
     end
-  rescue StorageService::Error => e
-    render_json_response(
-      status_code: 500,
-      message: admin_asset_message(MessageService::Admin::Asset::STORAGE_UPLOAD_FAILED),
-      error: e.message
-    )
   end
 
   # PUT /v1/admin/assets/:id
   def update
-    new_type = params.dig(:asset, :type).presence
-    client_name = params.dig(:asset, :name).to_s.strip
-    old_storage_key = @asset.storage_key
-    old_name = @asset.name
-    new_storage_key = nil
+    update_params = admin_asset_params
+    new_type = update_params[:type].presence
 
-    if new_type.present? && new_type != @asset.type && @asset.uploaded_file? && @asset.storage_key.present?
-      new_storage_key = AssetConstants::AssetName.rename_type(@asset.storage_key, new_type, @asset.created_by_id)
-      if new_storage_key != @asset.storage_key
-        Rails.logger.info("[AssetsController] Renaming storage object: #{@asset.storage_key} -> #{new_storage_key}")
-        StorageService::Client.move(@asset.storage_key, new_storage_key)
-        @asset.storage_key = new_storage_key
-        @asset.url = StorageService::Client.url(new_storage_key)
-        @asset.name = new_storage_key
+    if @asset.parent_asset_id.present? && new_type.present? && new_type != @asset.type
+      render_json_response(
+        status_code: 422,
+        message: admin_asset_message(MessageService::Admin::Asset::UPDATE_FAILED),
+        error: "Child asset type cannot be changed"
+      )
+      return
+    end
+
+    target_type = new_type || @asset.type
+    if target_type == AssetConstants::AssetType::THUMBNAIL && update_params[:parent_asset_id].present?
+      parent = Asset.find_by(id: update_params[:parent_asset_id])
+      existing_thumb = parent&.thumbnail
+      if existing_thumb && existing_thumb.id != @asset.id
+        existing_thumb.destroy!
       end
     end
 
-    update_params = admin_asset_params
-    if new_storage_key.present?
-      if client_name.blank? ||
-         client_name == old_name ||
-         client_name == old_storage_key ||
-         client_name == new_storage_key ||
-         client_name == AssetConstants::AssetName.rename_type(old_name, new_type, @asset.created_by_id)
+    if new_type.present? && !AssetConstants::AssetType.child_type?(new_type)
+      update_params = update_params.merge(parent_asset_id: nil) if @asset.parent_asset_id.blank?
+    end
+
+    if new_type.present? && new_type != @asset.type
+      if @asset.uploaded_file? && @asset.storage_key.present?
+        new_storage_key = AssetConstants::AssetName.rename_type(@asset.storage_key, new_type, @asset.type)
+        if new_storage_key != @asset.storage_key
+          Rails.logger.info("[AssetsController] Renaming storage object: #{@asset.storage_key} -> #{new_storage_key}")
+          StorageService::Client.move(@asset.storage_key, new_storage_key)
+          @asset.storage_key = new_storage_key
+          @asset.url = StorageService::Client.url(new_storage_key)
+        end
         update_params = update_params.merge(name: new_storage_key)
-      else
-        update_params = update_params.merge(name: AssetConstants::AssetName.rename_type(client_name, new_type, @asset.created_by_id))
+      elsif @asset.name.present?
+        new_name = AssetConstants::AssetName.rename_type(@asset.name, new_type, @asset.type)
+        update_params = update_params.merge(name: new_name)
       end
-    elsif new_type.present? && new_type == @asset.type && @asset.storage_key.present?
-      expected_name = AssetConstants::AssetName.rename_type(client_name, @asset.type, @asset.created_by_id)
-      if expected_name != client_name
-        update_params = update_params.merge(name: expected_name)
-      elsif @asset.name != @asset.storage_key && (@asset.name == old_storage_key || client_name == old_name)
-        update_params = update_params.merge(name: @asset.storage_key)
-      end
+    elsif @asset.storage_key.present?
+      update_params = update_params.except(:name)
     end
 
     if @asset.update(update_params)
       render_json_response(
         status_code: 200,
         message: admin_asset_message(MessageService::Admin::Asset::ASSET_UPDATED),
-        data: {
-          asset: AssetSerializer.new(@asset).serializable_hash[:data][:attributes]
-        }
+        data: AssetSerializer.record(@asset)
       )
     else
       render_json_response(
@@ -204,9 +227,7 @@ class V1::Admin::AssetsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: admin_asset_message(MessageService::Admin::Asset::ASSET_DISCARDED),
-      data: {
-        asset: AssetSerializer.new(@asset).serializable_hash[:data][:attributes]
-      }
+      data: AssetSerializer.record(@asset)
     )
   end
 
@@ -217,24 +238,23 @@ class V1::Admin::AssetsController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: admin_asset_message(MessageService::Admin::Asset::ASSET_RESTORED),
-      data: {
-        asset: AssetSerializer.new(@asset).serializable_hash[:data][:attributes]
-      }
+      data: AssetSerializer.record(@asset)
     )
   end
 
-  # GET /v1/admin/assets/discarded
-  def read_discarded
-    assets = search_assets(Asset.with_discarded.discarded)
-    assets = filter_assets(assets)
-    assets = sort(assets, columns: SortConstants::Columns::ASSET, default_column: "discarded_at")
-    pagy, records = pagy(:offset, assets, limit: params[:limit])
+  # GET /v1/admin/assets/storage_stats
+  def read_storage_stats
+    stats = StorageService::Client.storage_stats
+    db_count = Asset.kept.count
+    db_bytes = Asset.kept.sum(:size_bytes)
 
     render_json_response(
       status_code: 200,
-      message: admin_asset_message(MessageService::Admin::Asset::DISCARDED_ASSETS_RETRIEVED),
-      data: AssetSerializer.paginated(records, pagy),
-      pagy: pagy
+      message: admin_asset_message(MessageService::Admin::Asset::STORAGE_STATS_RETRIEVED),
+      data: stats.merge(
+        db_assets_count: db_count,
+        db_assets_bytes: db_bytes
+      )
     )
   end
 
@@ -287,7 +307,7 @@ class V1::Admin::AssetsController < V1::ApplicationController
 
   # POST /v1/admin/assets/discard_batch
   def discard_batch
-    ids = Array(params[:ids]).compact_blank
+    ids = Array(batch_params[:ids]).compact_blank
     if ids.blank?
       render_json_response(
         status_code: 422,
@@ -312,7 +332,7 @@ class V1::Admin::AssetsController < V1::ApplicationController
 
   # POST /v1/admin/assets/undiscard_batch
   def undiscard_batch
-    ids = Array(params[:ids]).compact_blank
+    ids = Array(batch_params[:ids]).compact_blank
     if ids.blank?
       render_json_response(
         status_code: 422,
@@ -337,7 +357,7 @@ class V1::Admin::AssetsController < V1::ApplicationController
 
   # POST /v1/admin/assets/destroy_batch
   def destroy_batch
-    ids = Array(params[:ids]).compact_blank
+    ids = Array(batch_params[:ids]).compact_blank
     if ids.blank?
       render_json_response(
         status_code: 422,
@@ -368,9 +388,7 @@ class V1::Admin::AssetsController < V1::ApplicationController
         status_code: 422,
         message: admin_asset_message(MessageService::Admin::Asset::COMPRESSION_ALREADY_OPTIMAL),
         error: admin_asset_message(MessageService::Admin::Asset::COMPRESSION_ALREADY_OPTIMAL),
-        data: {
-          asset: AssetSerializer.new(@asset.reload).serializable_hash[:data][:attributes]
-        }
+        data: AssetSerializer.record(@asset.reload)
       )
       return
     end
@@ -394,18 +412,39 @@ class V1::Admin::AssetsController < V1::ApplicationController
     end
 
     @asset.update!(status: MediaConstants::Status::PENDING)
+    operation_id = "#{NotificationConstants::OperationType::ASSET_COMPRESSION}:#{@asset.id}:#{SecureRandom.uuid}"
 
     if @asset.compressible_video?
-      Media::CompressVideoJob.perform_later(asset_id: @asset.id)
+      Media::CompressMediaJob.perform_later(
+        asset_id: @asset.id,
+        notification_user_id: current_user.id,
+        operation_id: operation_id
+      )
     elsif @asset.compressible_image?
-      Media::CompressImageJob.perform_later(asset_id: @asset.id)
+      Media::CompressMediaJob.perform_later(asset_id: @asset.id, notification_user_id: current_user.id, operation_id: operation_id)
+    elsif @asset.compressible_audio?
+      Media::CompressMediaJob.perform_later(asset_id: @asset.id, notification_user_id: current_user.id, operation_id: operation_id)
     end
+
+    NotificationService::Center.operation(
+      user_id: current_user.id,
+      operation_id: operation_id,
+      operation_type: NotificationConstants::OperationType::ASSET_COMPRESSION,
+      operation_status: NotificationConstants::OperationStatus::QUEUED,
+      message: admin_asset_message(MessageService::Admin::Asset::COMPRESSION_ENQUEUED),
+      link: "/admin/assets/#{@asset.id}",
+      data: { asset_id: @asset.id }
+    )
 
     render_json_response(
       status_code: 200,
       message: admin_asset_message(MessageService::Admin::Asset::COMPRESSION_ENQUEUED),
-      data: {
-        asset: AssetSerializer.new(@asset.reload).serializable_hash[:data][:attributes]
+      data: AssetSerializer.record(@asset.reload),
+      meta: {
+        operation_id: operation_id,
+        operation_type: NotificationConstants::OperationType::ASSET_COMPRESSION,
+        operation_status: NotificationConstants::OperationStatus::QUEUED,
+        link: "/admin/assets/#{@asset.id}"
       }
     )
   end
@@ -426,48 +465,159 @@ class V1::Admin::AssetsController < V1::ApplicationController
       return
     end
 
-    Media::GenerateVideoThumbnailJob.perform_later(asset_id: @asset.id, replace: true)
+    operation_id = "#{NotificationConstants::OperationType::VIDEO_THUMBNAIL}:#{@asset.id}:#{SecureRandom.uuid}"
+    Media::GenerateVideoThumbnailJob.perform_later(
+      asset_id: @asset.id,
+      replace: true,
+      notification_user_id: current_user.id,
+      operation_id: operation_id
+    )
+    NotificationService::Center.operation(
+      user_id: current_user.id,
+      operation_id: operation_id,
+      operation_type: NotificationConstants::OperationType::VIDEO_THUMBNAIL,
+      operation_status: NotificationConstants::OperationStatus::QUEUED,
+      message: admin_asset_message(MessageService::Admin::Asset::THUMBNAIL_REGENERATION_QUEUED),
+      link: "/admin/assets/#{@asset.id}",
+      data: { asset_id: @asset.id }
+    )
     render_json_response(
       status_code: 202,
       message: admin_asset_message(MessageService::Admin::Asset::THUMBNAIL_REGENERATION_QUEUED),
-      data: { asset: AssetSerializer.new(@asset.reload).serializable_hash[:data][:attributes] }
+      data: AssetSerializer.record(@asset.reload),
+      meta: {
+        operation_id: operation_id,
+        operation_type: NotificationConstants::OperationType::VIDEO_THUMBNAIL,
+        operation_status: NotificationConstants::OperationStatus::QUEUED,
+        link: "/admin/assets/#{@asset.id}"
+      }
     )
   end
 
   def update_thumbnail_upload
-    file = params[:file]
-    unless @asset.compressible_video? && file.present? && file.content_type.to_s.start_with?("image/")
+    file = upload_file_param[:file]
+    unless @asset.thumbnail_attachable? && file.present? && file.content_type.to_s.start_with?("image/")
       message = admin_asset_message(MessageService::Admin::Asset::THUMBNAIL_IMAGE_REQUIRED)
       render_json_response(status_code: 422, message: message, error: message)
       return
     end
 
-    result = StorageService::Client.upload(
-      file,
-      storage_key: AssetConstants::AssetName.thumbnail_for(@asset, version: SecureRandom.uuid),
-      resource_type: "image"
-    )
-    replace_thumbnail!(@asset, result, fallback_size: file.size)
-    render_json_response(
-      status_code: 200,
-      message: admin_asset_message(MessageService::Admin::Asset::THUMBNAIL_REPLACED),
-      data: { asset: AssetSerializer.new(@asset.reload).serializable_hash[:data][:attributes] }
-    )
-  rescue StandardError
-    StorageService::Client.delete(result[:storage_key]) if result&.dig(:storage_key)
-    raise
+    unless upload_within_limit?(file)
+      render_file_size_exceeded(file)
+      return
+    end
+
+    result = nil
+    begin
+      extension = File.extname(filename_for(file)).delete(".").downcase
+      result = StorageService::Client.upload(
+        file,
+        storage_key: AssetConstants::AssetName.thumbnail_for(
+          @asset,
+          version: SecureRandom.uuid,
+          extension: extension
+        ),
+        resource_type: "image"
+      )
+      thumbnail = replace_thumbnail!(
+        @asset,
+        result,
+        fallback_size: file.size,
+        status: processing_status_for(file)
+      )
+      enqueue_media_processing_if_needed(thumbnail)
+      render_json_response(
+        status_code: 200,
+        message: admin_asset_message(MessageService::Admin::Asset::THUMBNAIL_REPLACED),
+        data: AssetSerializer.record(@asset.reload)
+      )
+    rescue StandardError
+      StorageService::Client.delete(result[:storage_key]) if result&.dig(:storage_key)
+      raise
+    end
+  end
+
+  def update_subtitle_upload
+    file = upload_file_param[:file]
+    unless @asset.subtitle_attachable?
+      message = admin_asset_message(MessageService::Admin::Asset::SUBTITLE_PARENT_REQUIRED)
+      render_json_response(status_code: 422, message: message, error: message)
+      return
+    end
+
+    unless srt_upload?(file)
+      message = admin_asset_message(MessageService::Admin::Asset::SUBTITLE_SRT_REQUIRED)
+      render_json_response(status_code: 422, message: message, error: message)
+      return
+    end
+
+
+    unless upload_within_limit?(file)
+      render_file_size_exceeded(file)
+      return
+    end
+
+    result = nil
+    begin
+      result = StorageService::Client.upload(
+        file,
+        storage_key: AssetConstants::AssetName.subtitle_for(@asset, version: SecureRandom.uuid),
+        resource_type: "raw"
+      )
+      create_subtitle!(@asset, result, fallback_size: file.size)
+      render_json_response(
+        status_code: 200,
+        message: admin_asset_message(MessageService::Admin::Asset::SUBTITLE_UPLOADED),
+        data: AssetSerializer.record(@asset.reload)
+      )
+    rescue StandardError
+      StorageService::Client.delete(result[:storage_key]) if result&.dig(:storage_key)
+      raise
+    end
   end
 
   private
 
-  def replace_thumbnail!(asset, result, fallback_size:)
-    Asset.transaction do
-      asset.thumbnail&.destroy!
-      Asset.create!(
+  def replace_thumbnail!(asset, result, fallback_size:, status: MediaConstants::Status::READY)
+    previous_storage_key = nil
+    thumbnail = Asset.transaction do
+      existing = Asset.find_by(
+        parent_asset_id: asset.id,
+        type: AssetConstants::AssetType::THUMBNAIL
+      )
+      previous_storage_key = existing&.storage_key
+      attributes = {
         name: result[:storage_key], url: result[:url],
         type: AssetConstants::AssetType::THUMBNAIL,
         format: AssetConstants::AssetFormat::IMAGE,
         extension: result[:format].presence || MediaConstants::IMAGE_EXT_WEBP,
+        size_bytes: result[:bytes] || fallback_size,
+        source: AssetConstants::AssetSource::UPLOAD,
+        status: status,
+        storage_key: result[:storage_key], assetable: asset.assetable,
+        parent_asset: asset, created_by_id: current_user.id
+      }
+
+      if existing
+        existing.update!(attributes)
+        existing
+      else
+        Asset.create!(attributes)
+      end
+    end
+
+    delete_replaced_storage(previous_storage_key, thumbnail.storage_key, resource_type: "image")
+    asset.association(:thumbnail).reset
+    thumbnail
+  end
+
+  def create_subtitle!(asset, result, fallback_size:)
+    Asset.transaction do
+      Asset.create!(
+        name: result[:storage_key], url: result[:url],
+        type: AssetConstants::AssetType::SUBTITLE,
+        format: AssetConstants::AssetFormat::SUBTITLE,
+        extension: MediaConstants::SUBTITLE_EXT_SRT,
         size_bytes: result[:bytes] || fallback_size,
         source: AssetConstants::AssetSource::UPLOAD,
         status: MediaConstants::Status::READY,
@@ -477,12 +627,27 @@ class V1::Admin::AssetsController < V1::ApplicationController
     end
   end
 
+  def srt_upload?(file)
+    file.present? && file.content_type.to_s.in?(MediaConstants::SUBTITLE_CONTENT_TYPES) && AssetConstants::AssetFormat::SUBTITLE_EXTENSIONS.include?(
+      File.extname(filename_for(file)).delete(".").downcase
+    )
+  end
+
+  def delete_replaced_storage(previous_key, replacement_key, resource_type:)
+    return if previous_key.blank? || previous_key == replacement_key
+
+    StorageService::Client.delete(previous_key, resource_type: resource_type)
+  rescue StandardError => error
+    Rails.error.report(error)
+    Rails.logger.error("[AssetsController] Failed to delete replaced storage object #{previous_key}: #{error.message}")
+  end
+
   def admin_asset_message(key, **options)
     MessageService::Admin::Asset.t(key, **options)
   end
 
   def set_active_asset
-    @asset = Asset.kept.find(params[:id])
+    @asset = Asset.kept.find(params.permit(:id)[:id])
   rescue ActiveRecord::RecordNotFound
     render_json_response(
       status_code: 404,
@@ -491,7 +656,7 @@ class V1::Admin::AssetsController < V1::ApplicationController
   end
 
   def set_asset_including_discarded
-    @asset = Asset.with_discarded.find(params[:id])
+    @asset = Asset.with_discarded.find(params.permit(:id)[:id])
   rescue ActiveRecord::RecordNotFound
     render_json_response(
       status_code: 404,
@@ -499,74 +664,121 @@ class V1::Admin::AssetsController < V1::ApplicationController
     )
   end
 
+  def upload_params
+    params.permit(:file, :type, :assetable_type, :assetable_id, :duration_secs, :title, :description, :parent_asset_id)
+  end
+
+  def upload_file_param
+    params.permit(:file)
+  end
+
+  def batch_params
+    params.permit(ids: [])
+  end
+
   def admin_asset_params
-    params.require(:asset).permit(:name, :type, :assetable_type, :assetable_id)
+    params.require(:asset).permit(:name, :title, :description, :type, :assetable_type, :assetable_id, :parent_asset_id)
+  end
+
+  def filter_params
+    params.permit(:search, :type, :format, :source, :status, :record_scope, :discarded, :limit, :page)
   end
 
   def search_assets(scope)
-    search = params[:search].to_s.strip
+    search = filter_params[:search].to_s.strip
     return scope if search.blank?
 
     pattern = "%#{ActiveRecord::Base.sanitize_sql_like(search)}%"
     scope.where(
-      "assets.name ILIKE :search OR assets.storage_key ILIKE :search OR assets.assetable_type ILIKE :search",
+      "assets.name ILIKE :search OR assets.title ILIKE :search OR assets.storage_key ILIKE :search OR assets.assetable_type ILIKE :search",
       search: pattern
     )
   end
 
   def filter_assets(scope)
-    scope = scope.where(type: params[:type]) if params[:type].present?
-    scope = scope.where(format: params[:format]) if params[:format].present?
-    scope = scope.where(source: params[:source]) if params[:source].present?
-    scope = scope.where(status: params[:status]) if params[:status].present?
-    scope
+    filters = filter_params
+    scope = scope.where(type: filters[:type]) if filters[:type].present?
+    scope = scope.where(format: filters[:format]) if filters[:format].present?
+    scope = scope.where(source: filters[:source]) if filters[:source].present?
+    scope = scope.where(status: filters[:status]) if filters[:status].present?
+    filter_asset_record_scope(scope, filters[:record_scope])
   end
 
-  def determine_resource_type(file)
-    ext = File.extname(file.original_filename).delete(".").downcase
+  def filter_asset_record_scope(scope, record_scope = filter_params[:record_scope])
+    case record_scope.presence
+    when AssetConstants::RecordScope::CHILDREN
+      scope.where.not(parent_asset_id: nil)
+    when AssetConstants::RecordScope::ALL
+      scope
+    else
+      scope.where(parent_asset_id: nil)
+    end
+  end
+
+  def filename_for(file_or_name)
+    file_or_name.respond_to?(:original_filename) ? file_or_name.original_filename.to_s : file_or_name.to_s
+  end
+
+  def determine_resource_type(file_or_name)
+    ext = File.extname(filename_for(file_or_name)).delete(".").downcase
     AssetConstants::AssetFormat.storage_resource_type(ext)
   end
 
-  def determine_asset_format(file)
-    ext = File.extname(file.original_filename).delete(".").downcase
+  def determine_asset_format(file_or_name)
+    ext = File.extname(filename_for(file_or_name)).delete(".").downcase
     AssetConstants::AssetFormat.from_extension(ext)
   end
 
-  # Real playable length of an uploaded audio file — nil for non-audio or
-  # unreadable files, so the caller keeps its own value then.
-  def probed_duration_secs(file)
-    return nil unless determine_asset_format(file) == AssetConstants::AssetFormat::AUDIO
-
-    MediaService::AudioProbe.duration_secs(file)
+  def upload_limit_mb(file_or_name)
+    ext = File.extname(filename_for(file_or_name)).delete(".").downcase
+    AssetConstants::AssetFormat.upload_limit_mb(ext)
   end
 
-  # ── Media Compression Helpers ───────────────────────────────
+  def upload_within_limit?(file)
+    file.size <= upload_limit_mb(file).megabytes
+  end
 
-  def compression_status_for(file)
-    if MediaConstants::MEDIA_CONTAINER_ENABLED && file_compressible?(file)
+  def render_file_size_exceeded(file)
+    limit = upload_limit_mb(file)
+    message = admin_asset_message(MessageService::Admin::Asset::SAVE_FAILED)
+    render_json_response(
+      status_code: 422,
+      message: message,
+      error: admin_asset_message(MessageService::Admin::Asset::FILE_SIZE_EXCEEDED, limit: limit)
+    )
+  end
+
+  # ── Media Processing Helpers ───────────────────────────────
+
+  def processing_status_for(file)
+    if MediaConstants::MEDIA_CONTAINER_ENABLED && file_processable?(file)
       MediaConstants::Status::PENDING
     else
       MediaConstants::Status::READY
     end
   end
 
-  def enqueue_compression_if_needed(asset)
+  def enqueue_media_processing_if_needed(asset)
     return unless asset.status == MediaConstants::Status::PENDING
 
-    if asset.compressible_video?
-      Media::CompressVideoJob.perform_later(asset_id: asset.id)
+    if asset.image_convertible?
+      Media::ConvertImageJob.perform_later(asset_id: asset.id)
+      Rails.logger.info("[AssetsController] Enqueued image conversion for asset #{asset.id}")
+    elsif asset.compressible_video?
+      Media::CompressMediaJob.perform_later(asset_id: asset.id)
       Media::GenerateVideoThumbnailJob.perform_later(asset_id: asset.id)
       Rails.logger.info("[AssetsController] Enqueued video compression for asset #{asset.id}")
     elsif asset.compressible_image?
-      Media::CompressImageJob.perform_later(asset_id: asset.id)
+      Media::CompressMediaJob.perform_later(asset_id: asset.id)
       Rails.logger.info("[AssetsController] Enqueued image compression for asset #{asset.id}")
+    elsif asset.compressible_audio?
+      Media::CompressMediaJob.perform_later(asset_id: asset.id)
+      Rails.logger.info("[AssetsController] Enqueued audio compression for asset #{asset.id}")
     end
   end
 
-  def file_compressible?(file)
-    filename = file.respond_to?(:original_filename) ? file.original_filename : file.to_s
-    ext = File.extname(filename).delete(".").downcase
-    MediaConstants::COMPRESSIBLE_VIDEO_EXTENSIONS.include?(ext) ||
-      MediaConstants::COMPRESSIBLE_IMAGE_EXTENSIONS.include?(ext)
+  def file_processable?(file)
+    ext = File.extname(filename_for(file)).delete(".").downcase
+    MediaConstants::Processing::ALL_EXTENSIONS.include?(ext)
   end
 end

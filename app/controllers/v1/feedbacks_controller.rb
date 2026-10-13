@@ -15,7 +15,7 @@ class V1::FeedbacksController < V1::ApplicationController
     render_json_response(
       status_code: 201,
       message: feedback_message(MessageService::Feedback::CREATED),
-      data: FeedbackSerializer.new(feedback).serializable_hash[:data]
+      data: FeedbackSerializer.record(feedback)
     )
   rescue ActiveRecord::RecordInvalid => e
     render_json_response(
@@ -28,24 +28,23 @@ class V1::FeedbacksController < V1::ApplicationController
   # GET /v1/feedbacks
   def index
     feedbacks = current_user.feedbacks.recent
-    pagy, records = pagy(:offset, feedbacks, limit: params[:limit])
+    pagy, records = pagy(:offset, feedbacks, limit: index_params[:limit])
 
     render_json_response(
       status_code: 200,
       message: feedback_message(MessageService::Feedback::FETCHED),
-      data: FeedbackSerializer.paginated(records, pagy),
-      pagy: pagy
+      **FeedbackSerializer.collection_pagy(records, pagy)
     )
   end
 
   # GET /v1/feedbacks/:id
   def show
-    feedback = current_user.feedbacks.find(params[:id])
+    feedback = current_user.feedbacks.find(params.permit(:id)[:id])
 
     render_json_response(
       status_code: 200,
       message: feedback_message(MessageService::Feedback::FETCHED),
-      data: FeedbackSerializer.new(feedback).serializable_hash[:data]
+      data: FeedbackSerializer.record(feedback)
     )
   rescue ActiveRecord::RecordNotFound
     render_json_response(
@@ -56,6 +55,10 @@ class V1::FeedbacksController < V1::ApplicationController
   end
 
   private
+
+  def index_params
+    params.permit(:limit, :page)
+  end
 
   def feedback_params
     params.require(:feedback).permit(

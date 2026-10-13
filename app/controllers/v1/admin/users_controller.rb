@@ -1,45 +1,37 @@
 # app/controllers/v1/admin/users_controller.rb
 class V1::Admin::UsersController < V1::ApplicationController
-  before_action :super_admin_required!
   LOG_PREFIX = "[Admin::Users]".freeze
 
   before_action :set_active_user, only: %i[show update discard]
   before_action :set_user_including_discarded, only: :undiscard
   before_action :super_admin_required!, only: %i[
-    show
     create
     update
     discard
     undiscard
-    read_discarded
   ]
+  before_action :super_admin_required_for_discarded_index!, only: :index
 
   # GET /users?page=2&limit=25
   def index
-    users = search_users(User.includes(:roles))
-    users = sort(users, columns: SortConstants::Columns::USER)
+    filters = index_params
+    discarded = filters[:discarded].to_s == "true"
+    scope = discarded ? User.with_discarded.discarded.includes(:roles) : User.includes(:roles)
+    users = search_users(scope, search_term: filters[:search])
+    users = if discarded
+      sort(users, columns: SortConstants::Columns::USER, default_column: :discarded_at)
+    else
+      sort(users, columns: SortConstants::Columns::USER)
+    end
     Rails.logger.info("#{LOG_PREFIX} Query: #{users.to_sql}")
 
-    pagy, records = pagy(users)
+    pagy, records = pagy(users, limit: filters[:limit])
     render_json_response(
       status_code: 200,
-      message: admin_user_message(MessageService::Admin::User::USERS_RETRIEVED),
-      data: UserSerializer.paginated(records, pagy),
-      pagy: pagy
-    )
-  end
-
-  # GET /v1/admin/users/discarded?page=1&limit=25
-  def read_discarded
-    users = search_users(User.with_discarded.discarded.includes(:roles))
-    users = sort(users, columns: SortConstants::Columns::USER, default_column: :discarded_at)
-    pagy, records = pagy(users)
-
-    render_json_response(
-      status_code: 200,
-      message: admin_user_message(MessageService::Admin::User::DISCARDED_USERS_RETRIEVED),
-      data: UserSerializer.paginated(records, pagy),
-      pagy: pagy
+      message: admin_user_message(
+        discarded ? MessageService::Admin::User::DISCARDED_USERS_RETRIEVED : MessageService::Admin::User::USERS_RETRIEVED
+      ),
+      **UserSerializer.collection_pagy(records, pagy)
     )
   end
 
@@ -48,13 +40,13 @@ class V1::Admin::UsersController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: admin_user_message(MessageService::Admin::User::USER_RETRIEVED),
-      data: UserSerializer.new(@user).serializable_hash[:data][:attributes]
+      data: UserSerializer.record(@user)
     )
   end
 
   # POST /v1/admin/users
   def create
-    user = User.new(user_params)
+    user = User.new(user_attributes)
     if user.password.blank?
       temp_passcode = SecureRandom.random_number(10**6).to_s.rjust(6, "0")
       user.password = temp_passcode
@@ -62,12 +54,12 @@ class V1::Admin::UsersController < V1::ApplicationController
     end
 
     if user.save
-      assign_roles(user) if role_ids_param_provided?
+      assign_avatar(user) if avatar_param_provided?
 
       render_json_response(
         status_code: 201,
         message: admin_user_message(MessageService::Admin::User::USER_CREATED),
-        data: UserSerializer.new(user).serializable_hash[:data][:attributes]
+        data: UserSerializer.record(user)
       )
     else
       render_json_response(
@@ -80,14 +72,13 @@ class V1::Admin::UsersController < V1::ApplicationController
 
   # PATCH/PUT /v1/admin/users/:id
   def update
-    if @user.update(user_params)
-      assign_roles(@user) if role_ids_param_provided?
+    if @user.update(user_attributes)
       assign_avatar(@user) if avatar_param_provided?
 
       render_json_response(
         status_code: 200,
         message: admin_user_message(MessageService::Admin::User::USER_UPDATED),
-        data: UserSerializer.new(@user.reload).serializable_hash[:data][:attributes]
+        data: UserSerializer.record(@user.reload)
       )
     else
       render_json_response(
@@ -103,11 +94,18 @@ class V1::Admin::UsersController < V1::ApplicationController
     return if protected_lifecycle_user?
 
     @user.discard!
+    @user.update_column(:jti, SecureRandom.uuid)
+    AuthConstants::Session.clear_all(@user.id)
+    SocketService::Client.broadcast(
+      user_id: @user.id,
+      message: auth_message(MessageService::Auth::ACTIVE_SESSION_NOT_FOUND),
+      data: { type: NotificationConstants::NotificationType::SESSION_INVALIDATED }
+    )
 
     render_json_response(
       status_code: 200,
       message: admin_user_message(MessageService::Admin::User::USER_DISCARDED),
-      data: UserSerializer.new(@user).serializable_hash[:data][:attributes]
+      data: UserSerializer.record(@user)
     )
   end
 
@@ -118,25 +116,32 @@ class V1::Admin::UsersController < V1::ApplicationController
     render_json_response(
       status_code: 200,
       message: admin_user_message(MessageService::Admin::User::USER_RESTORED),
-      data: UserSerializer.new(@user).serializable_hash[:data][:attributes]
+      data: UserSerializer.record(@user)
     )
   end
 
   private
 
+  def index_params
+    params.permit(:discarded, :search, :limit, :page)
+  end
+
+  def super_admin_required_for_discarded_index!
+    super_admin_required! if index_params[:discarded].to_s == "true"
+  end
+
   def set_active_user
-    @user = User.find(params[:id])
+    @user = User.find(params.permit(:id)[:id])
   end
 
   def set_user_including_discarded
-    @user = User.with_discarded.find(params[:id])
+    @user = User.with_discarded.find(params.permit(:id)[:id])
   end
 
-  def search_users(scope)
-    search = params[:search].to_s.strip
-    return scope if search.blank?
+  def search_users(scope, search_term: nil)
+    return scope if search_term.blank?
 
-    pattern = "%#{ActiveRecord::Base.sanitize_sql_like(search)}%"
+    pattern = "%#{ActiveRecord::Base.sanitize_sql_like(search_term.to_s.strip)}%"
     scope.where(
       "users.username ILIKE :search OR users.name ILIKE :search OR users.email ILIKE :search",
       search: pattern
@@ -153,11 +158,10 @@ class V1::Admin::UsersController < V1::ApplicationController
     end
 
     return false unless @user.super_admin?
-    return false if User.joins(:roles).where(iam_roles: { name: "super_admin" }).count > 1
 
     render_json_response(
       status_code: 422,
-      message: admin_user_message(MessageService::Admin::User::LAST_SUPER_ADMIN_PROTECTED)
+      message: admin_user_message(MessageService::Admin::User::SUPER_ADMIN_LIFECYCLE_PROTECTED)
     )
     true
   end
@@ -166,34 +170,21 @@ class V1::Admin::UsersController < V1::ApplicationController
     params.require(:user).permit(
       :username,
       :name,
-      :email
+      :email,
+      :avatar_asset_id
     )
   end
 
-  def role_ids_param
-    params.dig(:user, :role_ids)
-  end
-
-  def role_ids_param_provided?
-    params[:user].respond_to?(:key?) && params[:user].key?(:role_ids)
-  end
-
-  def assign_roles(user)
-    role_ids = Array(role_ids_param).reject(&:blank?)
-    roles = Iam::Role.where(id: role_ids)
-
-    user.user_roles.destroy_all
-    roles.each do |role|
-      user.user_roles.find_or_create_by!(role: role)
-    end
+  def user_attributes
+    user_params.except(:avatar_asset_id)
   end
 
   def avatar_param_provided?
-    params[:user].respond_to?(:key?) && params[:user].key?(:avatar_asset_id)
+    user_params.key?(:avatar_asset_id)
   end
 
   def assign_avatar(user)
-    avatar_asset_id = params.dig(:user, :avatar_asset_id)
+    avatar_asset_id = user_params[:avatar_asset_id]
     if avatar_asset_id.present?
       asset = Asset.find(avatar_asset_id)
       old_avatars = user.assets.where(type: AssetConstants::AssetType::AVATAR).where.not(id: asset.id)

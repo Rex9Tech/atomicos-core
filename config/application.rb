@@ -8,7 +8,7 @@ Bundler.require(*Rails.groups)
 
 require_relative "app_config"
 
-module RexoneCore
+module RexOneCore
   class Application < Rails::Application
     # Initialize configuration defaults for originally generated Rails version.
     config.load_defaults 8.1
@@ -23,8 +23,11 @@ module RexoneCore
     # These settings can be overridden in specific environments using the files
     # in config/environments, which are processed later.
 
-    config.time_zone = "UTC"  # Set a consistent timezone
+    config.time_zone = AppConfig::SERVER_TIMEZONE
     config.active_record.default_timezone = :utc
+
+    # Media variants are handled by the custom Garage/Vips pipeline.
+    config.active_storage.variant_processor = :disabled
 
     # Admin API translations are grouped by resource under locales/admin.
     config.i18n.load_path += Dir[Rails.root.join("config/locales/admin/**/*.{rb,yml}")]

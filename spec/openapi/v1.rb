@@ -62,6 +62,19 @@ module Openapi
       { type: :object, properties: properties, required: required }
     end
 
+    def json_api_resource(type, attributes_schema, relationships: nil)
+      props = {
+        id: UUID,
+        type: { type: :string, example: type.to_s },
+        attributes: attributes_schema
+      }
+      props[:relationships] = relationships if relationships
+      object(
+        required: %i[id type attributes],
+        **props
+      )
+    end
+
     def path_parameter(name, description = nil)
       {
         name: name,
@@ -120,6 +133,16 @@ module Openapi
     end
 
     SCHEMAS = {
+      async_operation: object(
+        required: %i[operation_id operation_type operation_status link],
+        operation_id: { type: :string, description: "Stable identifier shared by every lifecycle update." },
+        operation_type: {
+          type: :string,
+          enum: NotificationConstants::OperationType::ALL
+        },
+        operation_status: { type: :string, enum: NotificationConstants::OperationStatus::ALL },
+        link: { type: :string, description: "Client route for the affected resource." }
+      ),
       signup_request: object(
         required: [ :user ],
         user: object(
@@ -176,7 +199,12 @@ module Openapi
       ),
       role_request: object(
         required: [ :name ],
-        name: { type: :string, example: "teacher" },
+        name: {
+          type: :string,
+          pattern: "^[a-z0-9_]+$",
+          example: "content_admin",
+          description: "Custom role name containing only lowercase ASCII letters, digits, and underscores."
+        },
         description: { type: :string, nullable: true },
         permission_ids: {
           type: :array,
@@ -195,9 +223,40 @@ module Openapi
           username: { type: :string, pattern: "^[a-z0-9_]+$", example: "admin_created" },
           name: { type: :string, maxLength: 50, example: "Admin Created" },
           email: { type: :string, format: :email, example: "admin-created@example.com" },
-          password: { type: :string, format: :password, minLength: 6, writeOnly: true },
-          password_confirmation: { type: :string, format: :password, minLength: 6, writeOnly: true },
-          role_ids: { type: :array, uniqueItems: true, items: UUID }
+          avatar_asset_id: UUID.merge(nullable: true)
+        )
+      ),
+      current_user_update_request: object(
+        required: [ :user ],
+        user: object(
+          name: { type: :string, maxLength: 50, example: "Alice Updated" },
+          username: {
+            type: :string,
+            minLength: 3,
+            maxLength: 30,
+            pattern: "^[a-z0-9_]+$",
+            example: "alice_new"
+          }
+        )
+      ),
+      user_version_request: object(
+        required: [ :user_version ],
+        user_version: object(
+          required: [ :version ],
+          version: { type: :string, example: "1.2.0", description: "Client marketing semver x.y.z" },
+          version_code: { type: :integer, minimum: 1, nullable: true, example: 84, description: "Optional client build number" }
+        )
+      ),
+      admin_version_request: object(
+        required: [ :version ],
+        version: object(
+          number: { type: :string, example: "1.2.0", description: "Marketing semver x.y.z" },
+          title: { type: :string, example: "Spring release" },
+          description: { type: :string, nullable: true, example: "Release notes" },
+          is_force_update: { type: :boolean, example: false },
+          status: { type: :string, enum: VersionConstants::Status::ALL, example: "draft" },
+          ios_build_number: { type: :integer, minimum: 1, nullable: true, example: 90 },
+          android_build_number: { type: :integer, minimum: 1, nullable: true, example: 84 }
         )
       ),
       current_user_update_request: object(
@@ -250,22 +309,84 @@ module Openapi
       admin_product_request: object(
         required: [ :product ],
         product: object(
-          required: %i[name price_unit_amount currency],
+          required: %i[name unit_amount currency],
           name: { type: :string, minLength: 1, example: "Premium Access" },
           description: { type: :string, nullable: true, example: "Unlocks premium features." },
-          price_unit_amount: {
+          unit_amount: {
             type: :integer,
             minimum: 0,
             description: "Amount in the smallest currency unit, for example cents. Use 0 for a free product."
           },
           currency: { type: :string, enum: Payment::Product.currencies.values, example: "usd" },
-          cycle: {
+          interval: {
             type: :string,
             nullable: true,
-            enum: Payment::Product.cycles.values + [ nil ],
+            enum: Payment::Product.intervals.values + [ nil ],
             description: "Use null for one-time products."
           },
+          google_play_product_id: { type: :string, nullable: true, example: "monthly_tier1" },
+          app_store_product_id: { type: :string, nullable: true, example: "monthly_tier1" },
           active: { type: :boolean, default: true }
+        )
+      ),
+      admin_coupon_request: object(
+        required: [ :coupon ],
+        coupon: object(
+          required: %i[title code coupon_type amount],
+          title: { type: :string, example: "Summer Promo" },
+          description: { type: :string, nullable: true },
+          code: { type: :string, example: "SUMMER20", pattern: "^[A-Z0-9]+$" },
+          coupon_type: { type: :string, enum: %w[percentage fixed], example: "percentage" },
+          amount: { type: :integer, minimum: 1, example: 20 },
+          currency: { type: :string, nullable: true, enum: %w[usd mmk sgd], example: "usd" },
+          max_usage: { type: :integer, minimum: 0, default: 0 },
+          max_usage_per_user: { type: :integer, minimum: 0, default: 1 },
+          expires_at: DATE_TIME,
+          referrer_id: UUID.merge(nullable: true),
+          active: { type: :boolean, default: true },
+          metadata: { type: :object, nullable: true },
+          target_role_ids: { type: :array, items: UUID, default: [] },
+          target_user_ids: { type: :array, items: UUID, default: [] },
+          target_user_emails: { type: :array, items: { type: :string, format: :email }, default: [] },
+          target_product_ids: { type: :array, items: UUID, default: [] }
+        )
+      ),
+      admin_coupon_update_request: object(
+        required: [ :coupon ],
+        coupon: object(
+          title: { type: :string, example: "Summer Promo" },
+          description: { type: :string, nullable: true },
+          max_usage_per_user: { type: :integer, minimum: 0, default: 1 },
+          referrer_id: UUID.merge(nullable: true),
+          active: { type: :boolean, default: true },
+          metadata: { type: :object, nullable: true },
+          target_role_ids: { type: :array, items: UUID, default: [] },
+          target_user_ids: { type: :array, items: UUID, default: [] },
+          target_user_emails: { type: :array, items: { type: :string, format: :email }, default: [] },
+          target_product_ids: { type: :array, items: UUID, default: [] }
+        )
+      ),
+      admin_coupon_batch_request: object(
+        required: %i[count prefix coupon],
+        count: { type: :integer, minimum: 1, maximum: 500, example: 50 },
+        prefix: { type: :string, example: "VIP", pattern: "^[A-Z0-9]+$" },
+        coupon: object(
+          required: %i[title coupon_type amount],
+          title: { type: :string, example: "VIP Promo" },
+          description: { type: :string, nullable: true },
+          coupon_type: { type: :string, enum: %w[percentage fixed], example: "percentage" },
+          amount: { type: :integer, minimum: 1, example: 15 },
+          currency: { type: :string, nullable: true, enum: %w[usd mmk sgd], example: "usd" },
+          max_usage: { type: :integer, minimum: 0, default: 1 },
+          max_usage_per_user: { type: :integer, minimum: 0, default: 1 },
+          expires_at: DATE_TIME,
+          referrer_id: UUID.merge(nullable: true),
+          active: { type: :boolean, default: true },
+          metadata: { type: :object, nullable: true },
+          target_role_ids: { type: :array, items: UUID, default: [] },
+          target_user_ids: { type: :array, items: UUID, default: [] },
+          target_user_emails: { type: :array, items: { type: :string, format: :email }, default: [] },
+          target_product_ids: { type: :array, items: UUID, default: [] }
         )
       ),
       admin_access_request: object(
@@ -300,7 +421,7 @@ module Openapi
           },
           expires_at: {
             type: :string,
-            format: :date_time,
+            format: "date-time",
             nullable: true,
             description: "Explicit expiration timestamp. Calculated from days if omitted."
           }
@@ -310,7 +431,7 @@ module Openapi
         required: [ :access ],
         access: object(
           days: { type: :integer, minimum: 1, nullable: true, example: 30 },
-          expires_at: { type: :string, format: :date_time, nullable: true },
+          expires_at: { type: :string, format: "date-time", nullable: true },
           status: { type: :string, nullable: true, enum: AccessConstants::AccessStatus::ALL }
         )
       ),
@@ -348,6 +469,9 @@ module Openapi
       asset_request: object(
         required: [ :asset ],
         asset: object(
+          name: { type: :string, nullable: true },
+          title: { type: :string, nullable: true },
+          description: { type: :string, nullable: true },
           storage_key: { type: :string, nullable: true },
           type: { type: :string, nullable: true },
           format: { type: :string, nullable: true },
@@ -356,12 +480,16 @@ module Openapi
           assetable_id: UUID.merge(nullable: true),
           size_bytes: { type: :integer, nullable: true },
           duration_secs: { type: :integer, nullable: true },
-          extension: { type: :string, nullable: true }
+          extension: { type: :string, nullable: true },
+          metadata: { type: :object, nullable: true }
         )
       ),
       asset_update_request: object(
         required: [ :asset ],
         asset: object(
+          name: { type: :string, nullable: true },
+          title: { type: :string, nullable: true },
+          description: { type: :string, nullable: true },
           storage_key: { type: :string, nullable: true },
           type: { type: :string, nullable: true },
           format: { type: :string, nullable: true },
@@ -370,12 +498,17 @@ module Openapi
           assetable_id: UUID.merge(nullable: true),
           size_bytes: { type: :integer, nullable: true },
           duration_secs: { type: :integer, nullable: true },
-          extension: { type: :string, nullable: true }
+          extension: { type: :string, nullable: true },
+          metadata: { type: :object, nullable: true }
         )
       ),
       user_role_request: object(
         required: [ :role_id ],
         role_id: UUID.merge(description: "Role UUID to assign to the path user.")
+      ),
+      role_user_request: object(
+        required: [ :user_id ],
+        user_id: UUID.merge(description: "User UUID to assign to the path role.")
       ),
       client_log_context: {
         type: :object,
@@ -444,13 +577,51 @@ module Openapi
           description: "One or more delivery channels: socket, push, or email."
         }
       ),
+      notification_template_request: object(
+        required: %i[event name category],
+        event: { type: :string },
+        name: { type: :string },
+        description: { type: :string, nullable: true },
+        category: { type: :string },
+        link: {
+          type: :string,
+          nullable: true,
+          pattern: "^(?:/(?:home|profile|payment|ai)|https://.+)$",
+          description: "Optional shared in-app route or absolute HTTPS external destination."
+        },
+        clients: {
+          type: :array,
+          minItems: 1,
+          uniqueItems: true,
+          items: { type: :string, pattern: "^[a-z][a-z0-9_]*$" },
+          default: NotificationConstants::Client::DEFAULT,
+          description: "Clients allowed to receive this in-app notification, such as web or mobile."
+        },
+        admin: { type: :boolean },
+        in_app_title: { type: :string, nullable: true },
+        in_app_body: { type: :string, nullable: true },
+        in_app_data: { type: :object, additionalProperties: true },
+        push_title: { type: :string, nullable: true },
+        push_body: { type: :string, nullable: true },
+        push_template_id: { type: :string, nullable: true },
+        email_subject: { type: :string, nullable: true },
+        email_body: { type: :string, nullable: true },
+        email_template_id: { type: :string, nullable: true }
+      ),
+      id_batch_request: object(
+        required: [ :ids ],
+        ids: { type: :array, minItems: 1, uniqueItems: true, items: UUID }
+      ),
       asset_upload_request: object(
         required: [ :file ],
         file: { type: :string, format: :binary },
+        title: { type: :string, description: "Human-friendly display name (defaults to original filename)." },
+        description: { type: :string, description: "Optional description or notes for the asset." },
         type: {
           type: :string,
           default: "general",
-          description: "Asset type: avatar, cover, card, audio, video, attachment, general."
+          enum: AssetConstants::AssetType::ALL,
+          description: "Asset classification."
         },
         assetable_type: {
           type: :string,
@@ -462,29 +633,101 @@ module Openapi
       ),
       asset_thumbnail_upload_request: object(
         required: [ :file ],
-        file: { type: :string, format: :binary }
+        file: { type: :string, format: :binary, description: "Image upload limited by MEDIA_MAX_IMAGE_SIZE_MB." }
+      ),
+      asset_subtitle_upload_request: object(
+        required: [ :file ],
+        file: { type: :string, format: :binary, description: "SRT upload limited by MEDIA_MAX_OTHER_SIZE_MB." }
       ),
       checkout_session_request: object(
         required: %i[product_id success_url cancel_url],
         product_id: UUID,
         success_url: { type: :string, format: :uri, description: "Client URL used by Stripe after success." },
-        cancel_url: { type: :string, format: :uri, description: "Client URL used by Stripe after cancellation." }
+        cancel_url: { type: :string, format: :uri, description: "Client URL used by Stripe after cancellation." },
+        coupon_code: { type: :string, nullable: true, description: "Optional coupon or promo code applied to checkout session." }
+      ),
+      coupon_validate_request: object(
+        required: %i[code product_id],
+        code: { type: :string, example: "SAVE20", description: "Coupon or promo code." },
+        product_id: UUID.merge(description: "Target product UUID.")
+      ),
+      payment_verify_request: object(
+        required: %i[product_id provider],
+        product_id: UUID.merge(description: "Target product UUID."),
+        provider: {
+          type: :string,
+          enum: [ PaymentConstants::Provider::GOOGLE_PLAY, PaymentConstants::Provider::APP_STORE ],
+          description: "In-app purchase provider."
+        },
+        transaction_id: { type: :string, nullable: true, description: "Transaction ID (required for App Store)." },
+        purchase_token: { type: :string, nullable: true, description: "Purchase token (required for Google Play)." },
+        receipt_data: { type: :string, nullable: true, description: "Receipt payload or signed data." },
+        package_name: { type: :string, nullable: true, description: "App package identifier." },
+        coupon_code: { type: :string, nullable: true, description: "Optional coupon or promo code applied." },
+        metadata: { type: :object, nullable: true, description: "Optional raw metadata or client payload." }
       ),
       ai_chat_request: object(
         required: [ :message ],
         message: { type: :string, minLength: 1 },
         room_id: UUID.merge(description: "Existing owned room UUID. Omit to use or create the current room."),
-        system_prompt: { type: :string, nullable: true, description: "Optional instruction prepended to this request." },
-        temperature: { type: :number, format: :float, default: 0.7, minimum: 0 },
-        max_tokens: { type: :integer, default: 2000, minimum: 1 }
+        profile_key: {
+          type: :string,
+          nullable: true,
+          enum: AiConstants::ProfileKey::ALL,
+          default: AiConstants::ProfileKey::CHAT_DEFAULT,
+          description: "Server-controlled AI profile. Raw provider parameters are not accepted from clients."
+        }
       ),
       ai_rename_request: object(
         required: [ :title ],
         title: { type: :string, minLength: 1 },
         room_id: UUID.merge(description: "Owned room UUID. Omit to use the current room.")
       ),
+      ai_room_update_request: object(
+        required: [ :title ],
+        title: { type: :string, minLength: 1 }
+      ),
+      ai_message_update_request: object(
+        required: [ :content ],
+        content: { type: :string, minLength: 1 }
+      ),
       ai_room_request: object(
         title: { type: :string, minLength: 1, description: "Omit to use the translated default room title." }
+      ),
+      ai_profile_create_request: object(
+        required: [ :profile ],
+        profile: object(
+          required: %i[key name model],
+          key: { type: :string, minLength: 1 },
+          name: { type: :string, minLength: 1 },
+          provider: { type: :string, enum: %w[deepseek gemini openai] },
+          enabled: { type: :boolean },
+          model: { type: :string, minLength: 1 },
+          temperature: { type: :number, format: :float, minimum: 0, maximum: 2 },
+          max_output_tokens: { type: :integer, minimum: 1 },
+          context_max_tokens: { type: :integer, minimum: 1 },
+          history_max_messages: { type: :integer, minimum: 1 },
+          timeout_seconds: { type: :integer, minimum: 1 },
+          system_prompt: { type: :string, nullable: true },
+          settings: { type: :object, additionalProperties: true }
+        )
+      ),
+      ai_profile_update_request: object(
+        required: [ :profile ],
+        profile: object(
+          key: { type: :string, minLength: 1 },
+          provider: { type: :string, enum: %w[deepseek gemini openai] },
+          name: { type: :string, minLength: 1 },
+          enabled: { type: :boolean },
+          model: { type: :string, minLength: 1 },
+          temperature: { type: :number, format: :float, minimum: 0, maximum: 2 },
+          max_output_tokens: { type: :integer, minimum: 1 },
+          context_max_tokens: { type: :integer, minimum: 1 },
+          history_max_messages: { type: :integer, minimum: 1 },
+          timeout_seconds: { type: :integer, minimum: 1 },
+          system_prompt: { type: :string, nullable: true },
+          settings: { type: :object, additionalProperties: true }
+        )
       ),
       ai_text_request: object(
         required: [ :text ],
@@ -502,7 +745,7 @@ module Openapi
       ai_analyze_request: object(
         required: [ :text ],
         text: { type: :string, minLength: 1 },
-        type: { type: :string, enum: %w[sentiment entities keywords], default: "sentiment" }
+        type: { type: :string, enum: AiConstants::AnalysisType::ALL, default: AiConstants::AnalysisType::SENTIMENT }
       ),
       speech_tts_request: object(
         text: {
@@ -604,16 +847,143 @@ module Openapi
         tts_status: { type: :string, enum: STATUSES, nullable: true, description: "Async TTS state for assistant messages." },
         tts_error: { type: :string, nullable: true, description: "Last TTS failure message when tts_status is failed or retrying." }
       ),
+      response_status: object(
+        required: %i[code success message],
+        code: { type: :integer, example: 200 },
+        success: { type: :boolean, example: true },
+        message: { type: :string }
+      ),
+      user_resource: json_api_resource(:user, ref(:user)),
+      asset_resource: json_api_resource(:asset, ref(:asset)),
+      message_resource: json_api_resource(:message, ref(:message)),
+      user_response: object(
+        required: %i[status data],
+        status: ref(:response_status),
+        data: ref(:user_resource)
+      ),
+      current_user_response: object(
+        required: %i[status data],
+        status: ref(:response_status),
+        data: ref(:user_resource)
+      ),
+      auth_session_response: object(
+        required: [ :status ],
+        status: ref(:response_status),
+        data: { nullable: true, oneOf: [ ref(:user_resource) ] },
+        meta: object(
+          token: { type: :string, description: "JWT bearer authentication token.", nullable: true },
+          otp_sent: { type: :boolean, description: "Indicates confirmation code/email was queued.", nullable: true },
+          password_required: { type: :boolean, description: "Indicates Google OAuth signup requires a password.", nullable: true },
+          challenge_token: { type: :string, description: "One-time challenge token for completing registration.", nullable: true }
+        )
+      ),
+      asset_operation_response: object(
+        required: %i[status data meta],
+        status: ref(:response_status),
+        data: ref(:asset_resource),
+        meta: object(
+          required: %i[operation_id operation_type operation_status link],
+          operation_id: { type: :string },
+          operation_type: { type: :string, enum: NotificationConstants::OperationType::ALL },
+          operation_status: { type: :string, enum: NotificationConstants::OperationStatus::ALL },
+          link: { type: :string }
+        )
+      ),
+      asset_upload_response: object(
+        required: %i[status data meta],
+        status: ref(:response_status),
+        data: ref(:asset_resource),
+        meta: object(
+          required: [ :storage_details ],
+          storage_details: object(
+            required: %i[storage_key bytes format],
+            storage_key: { type: :string },
+            bytes: { type: :integer },
+            format: { type: :string }
+          )
+        )
+      ),
+      asset_playback_response: object(
+        required: %i[status data],
+        status: ref(:response_status),
+        data: object(
+          required: %i[asset_id delivery media],
+          asset_id: UUID,
+          delivery: object(
+            required: %i[type url expires_at],
+            type: { type: :string, enum: [ MediaConstants::Playback::DELIVERY_TYPE_PROGRESSIVE ] },
+            url: { type: :string, format: :uri },
+            expires_at: DATE_TIME
+          ),
+          media: object(
+            required: %i[content_type format size_bytes duration_secs thumbnail subtitles],
+            content_type: { type: :string },
+            format: { type: :string, nullable: true },
+            size_bytes: { type: :integer, nullable: true },
+            duration_secs: { type: :number, nullable: true },
+            thumbnail: { nullable: true, oneOf: [ ref(:asset) ] },
+            subtitles: {
+              type: :array,
+              items: ref(:asset)
+            }
+          )
+        )
+      ),
+      ai_chat_response: object(
+        required: %i[status data meta],
+        status: ref(:response_status),
+        data: ref(:message_resource),
+        meta: object(
+          required: %i[room_id messages],
+          room_id: UUID,
+          messages: {
+            type: :array,
+            items: ref(:message_resource),
+            description: "List of messages created in the room."
+          },
+          status: { type: :string, enum: NotificationConstants::OperationStatus::ALL, nullable: true },
+          operation_id: { type: :string, nullable: true },
+          operation_type: { type: :string, enum: NotificationConstants::OperationType::ALL, nullable: true },
+          link: { type: :string, nullable: true },
+          job_id: { type: :string, nullable: true }
+        )
+      ),
+      payment_verify_data: object(
+        required: %i[verified product_id provider],
+        verified: { type: :boolean, example: true },
+        product_id: UUID,
+        provider: { type: :string, enum: [ PaymentConstants::Provider::GOOGLE_PLAY, PaymentConstants::Provider::APP_STORE ] },
+        purchase_id: UUID.merge(nullable: true),
+        subscription_id: UUID.merge(nullable: true),
+        access_id: UUID.merge(nullable: true),
+        expires_at: DATE_TIME,
+        coupon_code: { type: :string, nullable: true },
+        discount_amount: { type: :integer, nullable: true },
+        final_amount: { type: :integer, nullable: true }
+      ),
+      payment_verify_response: object(
+        required: %i[status data],
+        status: ref(:response_status),
+        data: ref(:payment_verify_data)
+      ),
       response: object(
         required: [ :status ],
-        status: object(
-          required: %i[code success message],
-          code: { type: :integer, example: 200 },
-          success: { type: :boolean, example: true },
-          message: { type: :string }
-        ),
+        status: ref(:response_status),
         data: { nullable: true },
-        meta: object(pagination: ref(:pagination))
+        meta: object(
+          pagination: ref(:pagination),
+          token: { type: :string, nullable: true },
+          cooldown_remaining: { type: :integer, nullable: true },
+          remaining_attempts: { type: :integer, nullable: true },
+          otp_sent: { type: :boolean, nullable: true },
+          password_required: { type: :boolean, nullable: true },
+          challenge_token: { type: :string, nullable: true },
+          storage_details: object(
+            storage_key: { type: :string },
+            bytes: { type: :integer },
+            format: { type: :string }
+          )
+        )
       ),
       error_response: object(
         required: [ :status ],
@@ -624,7 +994,11 @@ module Openapi
           message: { type: :string },
           error: { type: :string }
         ),
-        data: { nullable: true }
+        data: { nullable: true },
+        meta: object(
+          remaining_attempts: { type: :integer, nullable: true },
+          cooldown_remaining: { type: :integer, nullable: true }
+        )
       ),
       pagination: object(
         current_page: { type: :integer },
@@ -641,12 +1015,28 @@ module Openapi
         username: { type: :string },
         name: { type: :string, nullable: true },
         provider: { type: :string, enum: %w[email google] },
+        confirmed: { type: :boolean },
+        confirmed_at: DATE_TIME,
         avatar_url: { type: :string, format: :uri, nullable: true },
-        role_ids: { type: :array, items: UUID },
-        role_names: { type: :array, items: { type: :string } },
-        permissions: { type: :object, additionalProperties: { type: :array, items: { type: :string } } },
+        avatar_asset_id: UUID.merge(nullable: true),
+        iam: object(
+          is_admin: { type: :boolean },
+          is_super_admin: { type: :boolean },
+          roles: { type: :array, items: { type: :object } },
+          admin_roles: { type: :array, items: { type: :object } },
+          non_admin_roles: { type: :array, items: { type: :object } },
+          permissions: { type: :array, items: { type: :object } },
+          admin_permissions: { type: :array, items: { type: :object } },
+          non_admin_permissions: { type: :array, items: { type: :object } }
+        ),
+        accesses: {
+          type: :array,
+          items: ref(:access)
+        },
         created_at: DATE_TIME,
-        updated_at: DATE_TIME
+        updated_at: DATE_TIME,
+        discarded_at: { type: :string, format: :"date-time", nullable: true },
+        undiscarded_at: { type: :string, format: :"date-time", nullable: true }
       ),
       role: object(
         id: UUID,
@@ -669,58 +1059,115 @@ module Openapi
       ),
       product: object(
         id: UUID,
+        code: { type: :string, nullable: true },
         name: { type: :string },
         description: { type: :string, nullable: true },
-        price_unit_amount: { type: :integer, description: "Minor currency units" },
+        unit_amount: { type: :integer, description: "Minor currency units" },
         price: { type: :string },
         currency: { type: :string, example: "usd" },
-        cycle: { type: :string },
+        interval: { type: :string, nullable: true, enum: PaymentConstants::BillingInterval::ALL },
         period_label: { type: :string },
         recurring: { type: :boolean },
         free: { type: :boolean },
         active: { type: :boolean },
-        stripe_product_id: { type: :string },
-        stripe_price_id: { type: :string },
+        stripe_product_id: { type: :string, nullable: true },
+        stripe_price_id: { type: :string, nullable: true },
+        google_play_product_id: { type: :string, nullable: true },
+        app_store_product_id: { type: :string, nullable: true },
+        in_app: { type: :boolean },
+        supported_providers: { type: :array, items: { type: :string } },
+        thumbnail_url: { type: :string, format: :uri, nullable: true },
+        thumbnail_asset_id: UUID.merge(nullable: true),
         created_at: DATE_TIME,
-        updated_at: DATE_TIME
+        updated_at: DATE_TIME,
+        discarded_at: { type: :string, format: :"date-time", nullable: true },
+        undiscarded_at: { type: :string, format: :"date-time", nullable: true }
       ),
       subscription: object(
+        required: %i[
+          id user_id product_id provider provider_subscription_id
+          status currency unit_amount quantity interval interval_count
+          current_period_start current_period_end started_at cancel_at_period_end
+          active canceled past_due ended expired scheduled_for_cancellation
+          cancelable renewing created_at updated_at
+        ],
         id: UUID,
         user_id: UUID,
         product_id: UUID,
-        stripe_subscription_id: { type: :string },
-        stripe_customer_id: { type: :string },
-        status: { type: :string },
-        cycle: { type: :string },
-        current_period_start: DATE_TIME,
-        current_period_end: DATE_TIME,
+        provider: { type: :string },
+        provider_subscription_id: { type: :string },
+        provider_customer_id: { type: :string, nullable: true },
+        provider_subscription_item_id: { type: :string, nullable: true },
+        provider_price_id: { type: :string, nullable: true },
+        status: { type: :string, enum: PaymentConstants::SubscriptionStatus::ALL },
+        currency: { type: :string, pattern: "^[a-z]{3}$" },
+        unit_amount: { type: :integer, minimum: 0, description: "Price amount in minor currency units" },
+        quantity: { type: :integer, minimum: 1 },
+        interval: { type: :string, enum: PaymentConstants::BillingInterval::ALL },
+        interval_count: { type: :integer, minimum: 1 },
+        payment_method_id: { type: :string, nullable: true },
+        payment_method_type: { type: :string, nullable: true },
+        current_period_start: DATE_TIME.merge(nullable: false),
+        current_period_end: DATE_TIME.merge(nullable: false),
+        started_at: DATE_TIME.merge(nullable: false),
         cancel_at_period_end: { type: :boolean },
-        canceled_at: DATE_TIME,
-        cancel_at: DATE_TIME,
-        ended_at: DATE_TIME,
+        canceled_at: DATE_TIME.merge(nullable: true),
+        cancel_at: DATE_TIME.merge(nullable: true),
+        ended_at: DATE_TIME.merge(nullable: true),
         active: { type: :boolean },
         canceled: { type: :boolean },
+        past_due: { type: :boolean },
         ended: { type: :boolean },
+        expired: { type: :boolean },
         scheduled_for_cancellation: { type: :boolean },
         cancelable: { type: :boolean },
-        product_name: { type: :string },
-        price: { type: :string },
+        renewing: { type: :boolean },
+        days_until_renewal: { type: :integer, nullable: true },
+        days_until_period_end: { type: :integer, nullable: true },
+        payment_method_display: { type: :string, nullable: true },
+        card_last4: { type: :string, nullable: true },
+        card_brand: { type: :string, nullable: true },
+        masked_card_number: { type: :string, nullable: true },
+        product_name: { type: :string, nullable: true },
+        price: { type: :string, nullable: true },
+        period_label: { type: :string, nullable: true },
         created_at: DATE_TIME,
         updated_at: DATE_TIME
       ),
-      transaction: object(
+      purchase: object(
+        required: %i[
+          id user_id provider provider_payment_id status unit_amount currency
+          amount_received amount_capturable paid pending failed requires_action
+          created_at updated_at
+        ],
         id: UUID,
         user_id: UUID,
         product_id: UUID.merge(nullable: true),
-        stripe_payment_intent_id: { type: :string },
-        status: { type: :string },
-        price_unit_amount: { type: :string },
-        currency: { type: :string },
-        paid_at: DATE_TIME,
-        refunded_at: DATE_TIME,
+        provider: { type: :string },
+        provider_payment_id: { type: :string },
+        provider_charge_id: { type: :string, nullable: true },
+        provider_customer_id: { type: :string, nullable: true },
+        status: { type: :string, enum: PaymentConstants::PurchaseStatus::ALL },
+        payment_method_id: { type: :string, nullable: true },
+        payment_method_type: { type: :string, nullable: true },
+        unit_amount: { type: :integer, minimum: 1, description: "PaymentIntent amount in minor currency units" },
+        price: { type: :string },
+        currency: { type: :string, pattern: "^[a-z]{3}$" },
+        client_secret: { type: :string, nullable: true },
+        paid_at: DATE_TIME.merge(nullable: true),
+        refunded_at: DATE_TIME.merge(nullable: true),
+        canceled_at: DATE_TIME.merge(nullable: true),
+        processing_at: DATE_TIME.merge(nullable: true),
+        amount_received: { type: :integer, minimum: 0 },
+        amount_capturable: { type: :integer, minimum: 0 },
         paid: { type: :boolean },
         pending: { type: :boolean },
         failed: { type: :boolean },
+        requires_action: { type: :boolean },
+        payment_method_display: { type: :string, nullable: true },
+        card_last4: { type: :string, nullable: true },
+        card_brand: { type: :string, nullable: true },
+        masked_card_number: { type: :string, nullable: true },
         product_name: { type: :string, nullable: true },
         created_at: DATE_TIME,
         updated_at: DATE_TIME
@@ -728,10 +1175,16 @@ module Openapi
       access: object(
         id: UUID,
         product_id: UUID,
+        product_code: { type: :string, nullable: true },
         product_name: { type: :string, nullable: true },
+        user_id: UUID,
+        user_email: { type: :string, format: :email, nullable: true },
+        username: { type: :string, nullable: true },
+        user_name: { type: :string, nullable: true },
         status: { type: :string },
         granted_at: DATE_TIME,
         expires_at: DATE_TIME,
+        revoked_at: DATE_TIME,
         remaining_days: { type: :integer, nullable: true },
         active: { type: :boolean },
         created_at: DATE_TIME,
@@ -741,6 +1194,8 @@ module Openapi
         required: %i[id name url type source status],
         id: UUID,
         name: { type: :string },
+        title: { type: :string, nullable: true },
+        description: { type: :string, nullable: true },
         url: { type: :string, format: :uri },
         type: { type: :string, enum: AssetConstants::AssetType::ALL },
         format: { type: :string, enum: AssetConstants::AssetFormat::ALL, nullable: true },
@@ -749,17 +1204,57 @@ module Openapi
         duration_secs: { type: :integer, nullable: true },
         source: { type: :string, enum: [ AssetConstants::AssetSource::UPLOAD, AssetConstants::AssetSource::GOOGLE ] },
         status: { type: :string, enum: MediaConstants::Status::ALL },
+        metadata: { type: :object, description: "Arbitrary JSONB metadata" },
         assetable_type: { type: :string, nullable: true, description: "Polymorphic owner model, e.g. chat_message or user." },
         assetable_id: UUID.merge(nullable: true),
         parent_asset_id: UUID.merge(nullable: true),
-        thumbnail: {
+        children: {
           type: :object,
-          nullable: true,
           properties: {
-            id: UUID,
-            url: { type: :string, format: :uri },
-            status: { type: :string, enum: MediaConstants::Status::ALL },
-            size_bytes: { type: :integer, nullable: true }
+            thumbnail: {
+              type: :object,
+              nullable: true,
+              properties: {
+                id: UUID,
+                name: { type: :string },
+                title: { type: :string, nullable: true },
+                description: { type: :string, nullable: true },
+                metadata: { type: :object, description: "Arbitrary JSONB metadata" },
+                url: { type: :string, format: :uri },
+                type: { type: :string, enum: AssetConstants::AssetType::ALL },
+                format: { type: :string, enum: AssetConstants::AssetFormat::ALL, nullable: true },
+                extension: { type: :string, nullable: true },
+                status: { type: :string, enum: MediaConstants::Status::ALL },
+                size_bytes: { type: :integer, nullable: true },
+                duration_secs: { type: :integer, nullable: true },
+                parent_asset_id: UUID.merge(nullable: true),
+                created_at: DATE_TIME,
+                updated_at: DATE_TIME
+              }
+            },
+            subtitles: {
+              type: :array,
+              items: {
+                type: :object,
+                properties: {
+                  id: UUID,
+                  name: { type: :string },
+                  title: { type: :string, nullable: true },
+                  description: { type: :string, nullable: true },
+                  metadata: { type: :object, description: "Arbitrary JSONB metadata" },
+                  url: { type: :string, format: :uri },
+                  type: { type: :string, enum: AssetConstants::AssetType::ALL },
+                  format: { type: :string, enum: AssetConstants::AssetFormat::ALL, nullable: true },
+                  extension: { type: :string, nullable: true },
+                  status: { type: :string, enum: MediaConstants::Status::ALL },
+                  size_bytes: { type: :integer, nullable: true },
+                  duration_secs: { type: :integer, nullable: true },
+                  parent_asset_id: UUID.merge(nullable: true),
+                  created_at: DATE_TIME,
+                  updated_at: DATE_TIME
+                }
+              }
+            }
           }
         },
         created_at: DATE_TIME,
@@ -819,29 +1314,34 @@ module Openapi
         },
         "/signup" => {
           post: operation(tags: "Authentication", summary: "Create an email account", success: 201,
-                          security: nil, body: ref(:signup_request), errors: [ 400, 422 ]),
+                          security: nil, body: ref(:signup_request), errors: [ 400, 422 ],
+                          success_schema: ref(:user_response)),
           delete: operation(tags: "Authentication", summary: "Delete the current account", errors: [ 401 ])
         },
         "/signin" => {
           post: operation(tags: "Authentication", summary: "Sign in with email or username",
-                          security: nil, body: ref(:signin_request), errors: [ 401, 403, 429 ])
+                          security: nil, body: ref(:signin_request), errors: [ 401, 403, 429 ],
+                          success_schema: ref(:auth_session_response))
         },
         "/signout" => {
           delete: operation(tags: "Authentication", summary: "Sign out the active platform session", errors: [ 401 ])
         },
         "/signin/token" => {
           post: operation(tags: "Authentication", summary: "Exchange a one-time account token for a JWT",
-                          security: nil, body: ref(:token_signin_request), errors: [ 401, 403 ])
+                          security: nil, body: ref(:token_signin_request), errors: [ 401, 403 ],
+                          success_schema: ref(:auth_session_response))
         },
         "/signin/google" => {
           post: operation(tags: "Authentication", summary: "Start Google sign-in",
-                          security: nil, body: ref(:google_signin_request), errors: [ 401, 403 ])
+                          security: nil, body: ref(:google_signin_request), errors: [ 401, 403 ],
+                          success_schema: ref(:auth_session_response))
         },
         "/signin/google/complete" => {
           post: operation(
             tags: "Authentication", summary: "Complete Google registration with a passcode", security: nil,
             body: ref(:google_registration_request),
-            errors: [ 401, 403, 422 ]
+            errors: [ 401, 403, 422 ],
+            success_schema: ref(:auth_session_response)
           )
         },
         "/confirmation" => {
@@ -857,7 +1357,8 @@ module Openapi
         "/confirmation/confirm_code" => {
           post: operation(
             tags: "Authentication", summary: "Confirm an account using its email code", security: nil,
-            body: ref(:confirmation_verify_request), errors: [ 422 ]
+            body: ref(:confirmation_verify_request), errors: [ 422 ],
+            success_schema: ref(:auth_session_response)
           )
         },
         "/password/forgot" => {
@@ -885,7 +1386,8 @@ module Openapi
             description: "Public splash check. Query version (semver) drives update_required, must_update, and skip_premium. Missing or invalid JWT still returns 200. A valid JWT requires read_versions. Install tracking is POST /v1/client/versions/user-version.",
             security: nil,
             parameters: [
-              query_parameter(:version, description: "Client marketing semver x.y.z")
+              query_parameter(:version, description: "Client marketing semver x.y.z"),
+              query_parameter(:build_number, type: :integer, description: "Client platform build number")
             ],
             errors: []
           )
@@ -910,7 +1412,8 @@ module Openapi
               query_parameter(:page, type: :integer),
               query_parameter(:limit, type: :integer),
               query_parameter(:sort_by, type: :string),
-              query_parameter(:sort_order, enum: SortConstants::Order::ALL)
+              query_parameter(:sort_order, enum: SortConstants::Order::ALL),
+              query_parameter(:discarded, type: :boolean)
             ],
             errors: [ 401, 403 ]
           ),
@@ -921,20 +1424,6 @@ module Openapi
             success: 201,
             body: ref(:admin_version_request),
             errors: [ 401, 403, 422 ]
-          )
-        },
-        "/v1/admin/client/versions/discarded" => {
-          get: operation(
-            tags: "Admin / Versions",
-            summary: "List discarded versions",
-            description: "Super-admin only.",
-            parameters: [
-              query_parameter(:page, type: :integer),
-              query_parameter(:limit, type: :integer),
-              query_parameter(:sort_by, type: :string),
-              query_parameter(:sort_order, enum: SortConstants::Order::ALL)
-            ],
-            errors: [ 401, 403 ]
           )
         },
         "/v1/admin/client/versions/{id}" => {
@@ -1003,37 +1492,36 @@ module Openapi
           )
         },
         "/v1/users/current" => {
-          get: operation(tags: "Users", summary: "Get the current user", errors: [ 401 ]),
+          get: operation(tags: "Users", summary: "Get the current user", errors: [ 401 ],
+                         success_schema: ref(:current_user_response)),
           put: operation(
             tags: "Users",
             summary: "Update the current user's name and username",
             body: ref(:current_user_update_request),
-            errors: [ 401, 403, 422 ]
+            errors: [ 401, 422 ],
+            success_schema: ref(:current_user_response)
+          ),
+          delete: operation(
+            tags: "Users",
+            summary: "Delete (soft-delete / discard) the current user account and invalidate active sessions",
+            errors: [ 401, 422 ],
+            success_schema: ref(:current_user_response)
           )
-        },
-        "/v1/users/current/iam" => {
-          get: operation(tags: "Users", summary: "Get the current user's roles and permissions", errors: [ 401 ])
         }
       }
 
       paths["/v1/admin/users"] = {
         get: operation(tags: "Admin / Users", summary: "List users for the admin client",
                        parameters: [
+                         query_parameter(:page, type: :integer),
                          query_parameter(:limit, type: :integer, minimum: 1),
                          query_parameter(:search, type: :string),
                          query_parameter(:sort_by, type: :string),
-                         query_parameter(:sort_order, enum: SortConstants::Order::ALL)
+                         query_parameter(:sort_order, enum: SortConstants::Order::ALL),
+                         query_parameter(:discarded, type: :boolean)
                        ], errors: [ 401, 403 ]),
         post: operation(tags: "Admin / Users", summary: "Create an admin-managed user", success: 201,
                         body: ref(:admin_user_request), errors: [ 401, 403, 422 ])
-      }
-      paths["/v1/admin/users/discarded"] = {
-        get: operation(tags: "Admin / Users", summary: "List discarded users in the recycle bin",
-                       parameters: [
-                         query_parameter(:limit, type: :integer, minimum: 1),
-                         query_parameter(:sort_by, type: :string),
-                         query_parameter(:sort_order, enum: SortConstants::Order::ALL)
-                       ], errors: [ 401, 403 ])
       }
       paths["/v1/admin/users/{id}"] = {
         get: operation(tags: "Admin / Users", summary: "Get an admin-managed user",
@@ -1051,16 +1539,21 @@ module Openapi
       paths["/v1/admin/iam/roles"] = {
         get: operation(tags: "Admin / IAM Roles", summary: "List roles for the admin client",
                        parameters: [
+                         query_parameter(:page, type: :integer),
                          query_parameter(:limit, type: :integer, minimum: 1),
                          query_parameter(:sort_by, type: :string),
-                         query_parameter(:sort_order, enum: SortConstants::Order::ALL)
+                         query_parameter(:sort_order, enum: SortConstants::Order::ALL),
+                         query_parameter(:discarded, type: :boolean)
                        ], errors: [ 401, 403 ]),
         post: operation(tags: "Admin / IAM Roles", summary: "Create an admin-managed role", success: 201,
                         body: ref(:role_request), errors: [ 401, 403, 422 ])
       }
       paths["/v1/admin/iam/permissions"] = {
         get: operation(tags: "Admin / IAM Permissions", summary: "List permissions for the admin client",
-                       parameters: [ query_parameter(:limit, type: :integer, minimum: 1) ], errors: [ 401, 403 ]),
+                       parameters: [
+                         query_parameter(:limit, type: :integer, minimum: 1),
+                         query_parameter(:discarded, type: :boolean)
+                       ], errors: [ 401, 403 ]),
         post: operation(tags: "Admin / IAM Permissions", summary: "Create an admin-managed permission", success: 201,
                         body: ref(:permission_request), errors: [ 401, 403, 422 ])
       }
@@ -1073,6 +1566,12 @@ module Openapi
         delete: operation(tags: "Admin / IAM Roles", summary: "Delete an admin-managed role",
                           parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
       }
+      %w[discard undiscard].each do |action|
+        paths["/v1/admin/iam/roles/{id}/#{action}"] = {
+          post: operation(tags: "Admin / IAM Roles", summary: "#{action.capitalize} an admin-managed role",
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
+        }
+      end
       paths["/v1/admin/iam/permissions/{id}"] = {
         get: operation(tags: "Admin / IAM Permissions", summary: "Get an admin-managed permission",
                        parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ]),
@@ -1080,12 +1579,21 @@ module Openapi
                          parameters: [ path_parameter(:id) ], body: ref(:permission_request),
                          errors: [ 401, 403, 404, 422 ]),
         delete: operation(tags: "Admin / IAM Permissions", summary: "Delete an admin-managed permission",
-                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
       }
+      %w[discard undiscard].each do |action|
+        paths["/v1/admin/iam/permissions/{id}/#{action}"] = {
+          post: operation(tags: "Admin / IAM Permissions", summary: "#{action.capitalize} an admin-managed permission",
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
+        }
+      end
       paths["/v1/admin/chat/rooms"] = {
         get: operation(tags: "Admin / Chat Rooms", summary: "List chat rooms for the admin client",
                        parameters: [
+                         query_parameter(:page, type: :integer),
                          query_parameter(:limit, type: :integer, minimum: 1),
+                         query_parameter(:user_id, type: :string, format: :uuid),
+                         query_parameter(:discarded, type: :boolean),
                          query_parameter(:sort_by, type: :string),
                          query_parameter(:sort_order, enum: SortConstants::Order::ALL)
                        ], errors: [ 401, 403 ])
@@ -1102,7 +1610,12 @@ module Openapi
       paths["/v1/admin/chat/messages"] = {
         get: operation(tags: "Admin / Chat Messages", summary: "List chat messages for the admin client",
                        parameters: [
+                         query_parameter(:page, type: :integer),
                          query_parameter(:limit, type: :integer, minimum: 1),
+                         query_parameter(:room_id, type: :string, format: :uuid),
+                         query_parameter(:user_id, type: :string, format: :uuid),
+                         query_parameter(:role, type: :string),
+                         query_parameter(:discarded, type: :boolean),
                          query_parameter(:sort_by, type: :string),
                          query_parameter(:sort_order, enum: SortConstants::Order::ALL)
                        ], errors: [ 401, 403 ])
@@ -1116,23 +1629,26 @@ module Openapi
         delete: operation(tags: "Admin / Chat Messages", summary: "Delete an admin chat message",
                           parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
       }
+      [ [ "rooms", "room" ], [ "messages", "message" ] ].each do |collection, resource|
+        %w[discard undiscard].each do |action|
+          paths["/v1/admin/chat/#{collection}/{id}/#{action}"] = {
+            post: operation(tags: "Admin / Chat #{collection.capitalize}", summary: "#{action.capitalize} an admin chat #{resource}",
+                            parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
+          }
+        end
+      end
       paths["/v1/admin/payment/products"] = {
         get: operation(tags: "Admin / Payment Products", summary: "List Stripe-backed products for the admin client",
                        parameters: [
+                         query_parameter(:page, type: :integer),
                          query_parameter(:limit, type: :integer, minimum: 1),
+                         query_parameter(:search, type: :string),
+                         query_parameter(:discarded, type: :boolean),
                          query_parameter(:sort_by, type: :string),
                          query_parameter(:sort_order, enum: SortConstants::Order::ALL)
                        ], errors: [ 401, 403 ]),
         post: operation(tags: "Admin / Payment Products", summary: "Create a Stripe-backed product", success: 201,
                         body: ref(:admin_product_request), errors: [ 401, 403, 422 ])
-      }
-      paths["/v1/admin/payment/products/discarded"] = {
-        get: operation(tags: "Admin / Payment Products", summary: "List discarded Stripe-backed products for the recycle bin",
-                       parameters: [
-                         query_parameter(:limit, type: :integer, minimum: 1),
-                         query_parameter(:sort_by, type: :string),
-                         query_parameter(:sort_order, enum: SortConstants::Order::ALL)
-                       ], errors: [ 401, 403 ])
       }
       paths["/v1/admin/payment/products/{id}"] = {
         get: operation(tags: "Admin / Payment Products", summary: "Get a Stripe-backed product",
@@ -1153,6 +1669,7 @@ module Openapi
         get: operation(
           tags: "Admin / Accesses", summary: "List and filter user entitlements",
           parameters: [
+            query_parameter(:page, type: :integer),
             query_parameter(:limit, type: :integer, minimum: 1),
             query_parameter(:status, enum: AccessConstants::AccessStatus::ALL + [ "expiring_soon" ]),
             query_parameter(:product_id, type: :string),
@@ -1179,34 +1696,55 @@ module Openapi
       }
       paths["/v1/iam/permissions/current"] = {
         get: operation(tags: "IAM Permissions", summary: "List current user's permissions",
-                       parameters: [ query_parameter(:limit, type: :integer, minimum: 1) ], errors: [ 401, 403 ])
+                       parameters: [
+                         query_parameter(:page, type: :integer, minimum: 1, description: "Page number"),
+                         query_parameter(:limit, type: :integer, minimum: 1, description: "Page size")
+                       ], errors: [ 401, 403 ])
       }
       paths["/v1/iam/roles/current"] = {
         get: operation(tags: "IAM Roles", summary: "List current user's roles",
-                       parameters: [ query_parameter(:limit, type: :integer, minimum: 1) ], errors: [ 401, 403 ])
+                       parameters: [
+                         query_parameter(:page, type: :integer, minimum: 1, description: "Page number"),
+                         query_parameter(:limit, type: :integer, minimum: 1, description: "Page size")
+                       ], errors: [ 401, 403 ])
       }
 
-      paths["/v1/iam/users/{user_id}/roles"] = {
-        get: operation(tags: "IAM User Roles", summary: "List a user's roles",
+      paths["/v1/admin/iam/users/{user_id}/roles"] = {
+        get: operation(tags: "Admin / IAM User Roles", summary: "List a user's roles",
                        parameters: [ path_parameter(:user_id) ], errors: [ 401, 403, 404 ]),
         post: operation(
-          tags: "IAM User Roles", summary: "Assign a role to a user",
+          tags: "Admin / IAM User Roles", summary: "Assign a role to a user",
           parameters: [ path_parameter(:user_id) ],
           body: ref(:user_role_request), errors: [ 401, 403, 404, 422 ]
         )
       }
-      paths["/v1/iam/users/{user_id}/roles/{id}"] = {
-        delete: operation(tags: "IAM User Roles", summary: "Remove a role from a user",
-                          parameters: [ path_parameter(:user_id), path_parameter(:id, "Role ID") ],
-                          errors: [ 401, 403, 404 ])
+      paths["/v1/admin/iam/users/{user_id}/roles/{role_id}"] = {
+        delete: operation(tags: "Admin / IAM User Roles", summary: "Remove a role from a user",
+                          parameters: [ path_parameter(:user_id), path_parameter(:role_id, "Role ID") ],
+                          errors: [ 401, 403, 404, 422 ])
+      }
+      paths["/v1/admin/iam/roles/{role_id}/users"] = {
+        get: operation(tags: "Admin / IAM User Roles", summary: "List users assigned to a role",
+                       parameters: [ path_parameter(:role_id, "Role ID") ], errors: [ 401, 403, 404 ]),
+        post: operation(
+          tags: "Admin / IAM User Roles", summary: "Assign a user to a role",
+          parameters: [ path_parameter(:role_id, "Role ID") ],
+          body: ref(:role_user_request), errors: [ 401, 403, 404, 422 ]
+        )
+      }
+      paths["/v1/admin/iam/roles/{role_id}/users/{user_id}"] = {
+        delete: operation(tags: "Admin / IAM User Roles", summary: "Remove a user from a role",
+                          parameters: [ path_parameter(:role_id, "Role ID"), path_parameter(:user_id) ],
+                          errors: [ 401, 403, 404, 422 ])
       }
 
-      log_filters = %i[severity platform environment unresolved resolved storage_issues].map do |name|
-        query_parameter(name, type: name.in?(%i[unresolved resolved storage_issues]) ? :boolean : :string)
+      log_filters = %i[severity platform environment discarded unresolved resolved storage_issues].map do |name|
+        query_parameter(name, type: name.in?(%i[discarded unresolved resolved storage_issues]) ? :boolean : :string)
       end
       paths["/v1/client/logs"] = {
         get: operation(tags: "Client Logs", summary: "List and filter client error reports",
                        parameters: log_filters + [
+                         query_parameter(:page, type: :integer),
                          query_parameter(:limit, type: :integer, minimum: 1),
                          query_parameter(:sort_by, type: :string),
                          query_parameter(:sort_order, enum: SortConstants::Order::ALL)
@@ -1227,12 +1765,25 @@ module Openapi
                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
         }
       end
+      %w[discard undiscard].each do |action|
+        paths["/v1/client/logs/{id}/#{action}"] = {
+          post: operation(
+            tags: "Client Logs",
+            summary: action == "discard" ? "Move a client error to the recycle bin" : "Restore a discarded client error",
+            parameters: [ path_parameter(:id) ],
+            errors: [ 401, 403, 404 ]
+          )
+        }
+      end
 
-      paths["/v1/media/upload"] = {
-        post: operation(tags: "Media", summary: "Upload and persist an asset", success: 201,
-                        body: ref(:asset_upload_request), errors: [ 401, 422, 500 ])
+      paths["/v1/assets/upload"] = {
+        post: operation(tags: "Media", summary: "Upload and persist an asset",
+                        description: "Stores the upload immediately. Compressible media and SVG-to-PNG conversion are processed asynchronously by the dedicated media queue. Upload limits are selected independently for video, audio, image, and other formats.",
+                        success: 201,
+                        body: ref(:asset_upload_request), errors: [ 401, 422, 500 ],
+                        success_schema: ref(:asset_upload_response))
       }
-      paths["/v1/media/upload"][:post][:requestBody] = {
+      paths["/v1/assets/upload"][:post][:requestBody] = {
         required: true,
         content: {
           "multipart/form-data" => {
@@ -1241,6 +1792,21 @@ module Openapi
         }
       }
       paths["/v1/admin/notifications"] = {
+        get: operation(
+          tags: "Admin / Notifications",
+          summary: "List notification templates",
+          parameters: [
+            query_parameter(:category), query_parameter(:search),
+            query_parameter(:page, type: :integer), query_parameter(:limit, type: :integer)
+          ],
+          errors: [ 401, 403 ]
+        ),
+        post: operation(
+          tags: "Admin / Notifications", summary: "Create a notification template", success: 201,
+          body: ref(:notification_template_request), errors: [ 401, 403, 422 ]
+        )
+      }
+      paths["/v1/admin/notifications/dispatch"] = {
         post: operation(
           tags: "Admin / Notifications",
           summary: "Queue an admin notification for selected users, selected roles, or all users",
@@ -1255,14 +1821,58 @@ module Openapi
           errors: [ 401, 403, 422, 503 ]
         )
       }
-      paths["/v1/admin/notifications/templates"] = {
+      paths["/v1/admin/notifications/{id}"] = {
+        get: operation(tags: "Admin / Notifications", summary: "Get a notification template",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ]),
+        put: operation(tags: "Admin / Notifications", summary: "Update a notification template",
+                       parameters: [ path_parameter(:id) ], body: ref(:notification_template_request),
+                       errors: [ 401, 403, 404, 422 ]),
+        delete: operation(tags: "Admin / Notifications", summary: "Discard a notification template",
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
+      }
+      paths["/v1/admin/notifications/{id}/undiscard"] = {
+        post: operation(tags: "Admin / Notifications", summary: "Restore a discarded notification template",
+                        parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
+      }
+
+      user_notification_filters = %i[status filter search client user_id].map { |name| query_parameter(name) }
+      paths["/v1/admin/user_notifications"] = {
         get: operation(
-          tags: "Admin / Notifications",
-          summary: "List notification events and their admin availability",
-          description: "Returns both selectable broadcast events and unavailable transactional events for display.",
+          tags: "Admin / User Notifications",
+          summary: "List and filter user notifications for admins",
+          parameters: user_notification_filters + [
+            query_parameter(:page, type: :integer),
+            query_parameter(:limit, type: :integer),
+            query_parameter(:discarded, type: :boolean),
+            query_parameter(:sort_by, type: :string),
+            query_parameter(:sort_order, enum: SortConstants::Order::ALL)
+          ],
           errors: [ 401, 403 ]
         )
       }
+      paths["/v1/admin/user_notifications/bin"] = {
+        delete: operation(tags: "Admin / User Notifications", summary: "Permanently empty the user notifications recycle bin",
+                          errors: [ 401, 403, 422 ])
+      }
+      %w[discard_batch undiscard_batch destroy_batch].each do |action|
+        paths["/v1/admin/user_notifications/#{action}"] = {
+          post: operation(tags: "Admin / User Notifications", summary: "#{action.humanize} user notifications",
+                          body: ref(:id_batch_request), errors: [ 401, 403, 404, 422 ])
+        }
+      end
+      paths["/v1/admin/user_notifications/{id}"] = {
+        get: operation(tags: "Admin / User Notifications", summary: "Get user notification details",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ]),
+        delete: operation(tags: "Admin / User Notifications", summary: "Permanently destroy a user notification",
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
+      }
+      %w[discard undiscard].each do |action|
+        paths["/v1/admin/user_notifications/{id}/#{action}"] = {
+          post: operation(tags: "Admin / User Notifications", summary: "#{action.capitalize} a user notification",
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
+        }
+      end
+
       paths["/v1/admin/analytics/overview"] = {
         get: operation(tags: "Admin / Analytics", summary: "Get admin analytics overview KPIs, time-series data, and breakdowns",
                        parameters: [
@@ -1273,7 +1883,17 @@ module Openapi
       }
 
       paths["/v1/payment/products"] = {
-        get: operation(tags: "Payments", summary: "List active payment products", errors: [ 401 ])
+        get: operation(
+          tags: "Payments",
+          summary: "List active payment products",
+          parameters: [
+            query_parameter(:page, type: :integer),
+            query_parameter(:limit, type: :integer, minimum: 1),
+            query_parameter(:search, type: :string, description: "Filter by product name or description"),
+            query_parameter(:recurring, type: :boolean, description: "Filter by recurring or one-time products")
+          ],
+          errors: [ 401 ]
+        )
       }
       paths["/v1/payment/products/{id}"] = {
         get: operation(tags: "Payments", summary: "Get a payment product",
@@ -1294,15 +1914,52 @@ module Openapi
                           parameters: [ path_parameter(:id) ], errors: [ 401, 404, 422 ])
         }
       end
-      paths["/v1/payment/transactions"] = {
-        get: operation(tags: "Payments", summary: "List the current user's transactions", errors: [ 401 ])
+      paths["/v1/payment/purchases"] = {
+        get: operation(tags: "Payments", summary: "List the current user's purchases", errors: [ 401 ])
       }
-      paths["/v1/payment/transactions/recent"] = {
-        get: operation(tags: "Payments", summary: "List recent successful transactions", errors: [ 401 ])
+      paths["/v1/payment/purchases/recent"] = {
+        get: operation(tags: "Payments", summary: "List recent successful purchases", errors: [ 401 ])
       }
-      paths["/v1/payment/transactions/{id}"] = {
-        get: operation(tags: "Payments", summary: "Get a transaction",
+      paths["/v1/payment/purchases/{id}"] = {
+        get: operation(tags: "Payments", summary: "Get a purchase",
                        parameters: [ path_parameter(:id) ], errors: [ 401, 404 ])
+      }
+      paths["/v1/admin/payment/purchases"] = {
+        get: operation(tags: "Admin / Payments", summary: "List all payment purchases",
+                       parameters: [
+                         query_parameter(:page, type: :integer),
+                         query_parameter(:limit, type: :integer),
+                         query_parameter(:sort_by, type: :string),
+                         query_parameter(:sort_order, type: :string),
+                         query_parameter(:search, type: :string),
+                         query_parameter(:status, type: :string),
+                         query_parameter(:currency, type: :string),
+                         query_parameter(:product_id, type: :string, format: :uuid),
+                         query_parameter(:user_id, type: :string, format: :uuid)
+                       ], errors: [ 401, 403 ])
+      }
+      paths["/v1/admin/payment/purchases/{id}"] = {
+        get: operation(tags: "Admin / Payments", summary: "Get a payment purchase",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
+      }
+      paths["/v1/admin/payment/subscriptions"] = {
+        get: operation(tags: "Admin / Payments", summary: "List all payment subscriptions",
+                       parameters: [
+                         query_parameter(:page, type: :integer),
+                         query_parameter(:limit, type: :integer),
+                         query_parameter(:sort_by, type: :string),
+                         query_parameter(:sort_order, type: :string),
+                         query_parameter(:search, type: :string),
+                         query_parameter(:status, type: :string),
+                         query_parameter(:interval, type: :string),
+                         query_parameter(:product_id, type: :string, format: :uuid),
+                         query_parameter(:user_id, type: :string, format: :uuid),
+                         query_parameter(:cancel_at_period_end, type: :boolean)
+                       ], errors: [ 401, 403 ])
+      }
+      paths["/v1/admin/payment/subscriptions/{id}"] = {
+        get: operation(tags: "Admin / Payments", summary: "Get a payment subscription",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
       }
       paths["/v1/payment/session"] = {
         post: operation(
@@ -1316,6 +1973,100 @@ module Openapi
                        parameters: [ { name: :session_id, in: :path, required: true,
                                        schema: { type: :string, example: "cs_test_123" } } ],
                        errors: [ 401, 404 ])
+      }
+      paths["/v1/payment/verify"] = {
+        post: operation(
+          tags: "Payments", summary: "Verify in-app purchase and grant product access",
+          body: ref(:payment_verify_request),
+          success_schema: ref(:payment_verify_response),
+          errors: [ 401, 404, 422 ]
+        )
+      }
+      paths["/v1/payment/coupons/validate"] = {
+        post: operation(
+          tags: "Payments", summary: "Validate a coupon or promo code against a product",
+          body: ref(:coupon_validate_request),
+          errors: [ 401, 404, 422, 429 ]
+        )
+      }
+
+      coupon_filters = [
+        query_parameter(:coupon_type, enum: %w[percentage fixed]),
+        query_parameter(:currency, enum: %w[usd mmk sgd]),
+        query_parameter(:active, type: :boolean),
+        query_parameter(:discarded, type: :boolean),
+        query_parameter(:search, type: :string),
+        query_parameter(:page, type: :integer),
+        query_parameter(:limit, type: :integer),
+        query_parameter(:sort_by, type: :string),
+        query_parameter(:sort_order, enum: SortConstants::Order::ALL)
+      ]
+      paths["/v1/admin/payment/coupons"] = {
+        get: operation(tags: "Admin / Coupons", summary: "List and filter coupons for admins",
+                       parameters: coupon_filters, errors: [ 401, 403 ]),
+        post: operation(tags: "Admin / Coupons", summary: "Create a discount coupon", success: 201,
+                        body: ref(:admin_coupon_request), errors: [ 401, 403, 422 ])
+      }
+      paths["/v1/admin/payment/coupons/batch"] = {
+        post: operation(tags: "Admin / Coupons", summary: "Bulk generate promo coupons", success: 201,
+                        body: ref(:admin_coupon_batch_request), errors: [ 401, 403, 422 ])
+      }
+      paths["/v1/admin/payment/coupons/bin"] = {
+        delete: operation(tags: "Admin / Coupons", summary: "Permanently empty the coupon recycle bin",
+                          errors: [ 401, 403, 422 ])
+      }
+      %w[discard_batch undiscard_batch destroy_batch].each do |action|
+        paths["/v1/admin/payment/coupons/#{action}"] = {
+          post: operation(tags: "Admin / Coupons", summary: "#{action.humanize} coupons",
+                          body: ref(:id_batch_request), errors: [ 401, 403, 404, 422 ])
+        }
+      end
+      paths["/v1/admin/payment/coupons/{id}"] = {
+        get: operation(tags: "Admin / Coupons", summary: "Get coupon details",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ]),
+        patch: operation(tags: "Admin / Coupons", summary: "Update coupon details",
+                         parameters: [ path_parameter(:id) ], body: ref(:admin_coupon_update_request),
+                         errors: [ 401, 403, 404, 422 ]),
+        delete: operation(tags: "Admin / Coupons", summary: "Permanently destroy a coupon",
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
+      }
+      %w[discard undiscard].each do |action|
+        paths["/v1/admin/payment/coupons/{id}/#{action}"] = {
+          post: operation(tags: "Admin / Coupons", summary: "#{action.capitalize} a coupon",
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
+        }
+      end
+      paths["/v1/admin/payment/coupons/{id}/redemptions"] = {
+        get: operation(tags: "Admin / Coupons", summary: "List coupon redemptions",
+                       parameters: [
+                         path_parameter(:id),
+                         query_parameter(:payment_type, type: :string),
+                         query_parameter(:search, type: :string),
+                         query_parameter(:page, type: :integer),
+                         query_parameter(:limit, type: :integer),
+                         query_parameter(:sort_by, type: :string),
+                         query_parameter(:sort_order, enum: SortConstants::Order::ALL)
+                       ], errors: [ 401, 403, 404 ])
+      }
+
+      user_coupon_filters = [
+        query_parameter(:coupon_id, format: :uuid),
+        query_parameter(:user_id, format: :uuid),
+        query_parameter(:product_id, format: :uuid),
+        query_parameter(:payment_type, type: :string),
+        query_parameter(:search, type: :string),
+        query_parameter(:page, type: :integer),
+        query_parameter(:limit, type: :integer),
+        query_parameter(:sort_by, type: :string),
+        query_parameter(:sort_order, enum: SortConstants::Order::ALL)
+      ]
+      paths["/v1/admin/payment/user_coupons"] = {
+        get: operation(tags: "Admin / User Coupons", summary: "List and filter coupon redemptions for admins",
+                       parameters: user_coupon_filters, errors: [ 401, 403 ])
+      }
+      paths["/v1/admin/payment/user_coupons/{id}"] = {
+        get: operation(tags: "Admin / User Coupons", summary: "Get user coupon redemption details",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
       }
 
       paths["/v1/accesses"] = {
@@ -1367,23 +2118,34 @@ module Openapi
       paths["/v1/admin/assets"] = {
         get: operation(tags: "Admin / Assets", summary: "List and filter assets for admins",
                        parameters: asset_filters + [
+                         query_parameter(:record_scope, enum: AssetConstants::RecordScope::VALUES,
+                                                        description: "parents returns only top-level assets, children returns thumbnails/subtitles, all returns both."),
                          query_parameter(:page, type: :integer),
-                         query_parameter(:limit, type: :integer)
+                         query_parameter(:limit, type: :integer),
+                         query_parameter(:discarded, type: :boolean)
                        ],
                        errors: [ 401, 403 ])
       }
-      paths["/v1/admin/assets/discarded"] = {
-        get: operation(tags: "Admin / Assets", summary: "List discarded assets in the recycle bin",
-                       parameters: [
-                         query_parameter(:limit, type: :integer),
-                         query_parameter(:page, type: :integer),
-                         query_parameter(:sort_by, type: :string),
-                         query_parameter(:sort_order, enum: SortConstants::Order::ALL)
-                       ], errors: [ 401, 403 ])
+      paths["/v1/admin/assets/storage_stats"] = {
+        get: operation(tags: "Admin / Assets", summary: "Get database, Garage partition, and host storage statistics",
+                       description: "Super-admin only.", errors: [ 401, 403, 503 ])
       }
+      paths["/v1/admin/assets/bin"] = {
+        delete: operation(tags: "Admin / Assets", summary: "Permanently empty the asset recycle bin",
+                          errors: [ 401, 403, 422 ])
+      }
+      %w[discard_batch undiscard_batch destroy_batch].each do |action|
+        paths["/v1/admin/assets/#{action}"] = {
+          post: operation(tags: "Admin / Assets", summary: "#{action.humanize} assets",
+                          body: ref(:id_batch_request), errors: [ 401, 403, 404, 422 ])
+        }
+      end
       paths["/v1/admin/assets/upload"] = {
-        post: operation(tags: "Admin / Assets", summary: "Upload and persist an asset via admin", success: 201,
-                        body: ref(:asset_upload_request), errors: [ 401, 403, 422, 500 ])
+        post: operation(tags: "Admin / Assets", summary: "Upload and persist an asset via admin",
+                        description: "Stores the upload immediately. Compressible media and SVG-to-PNG conversion are processed asynchronously by the dedicated media queue. Upload limits are selected independently for video, audio, image, and other formats.",
+                        success: 201,
+                        body: ref(:asset_upload_request), errors: [ 401, 403, 422, 500 ],
+                        success_schema: ref(:asset_upload_response))
       }
       paths["/v1/admin/assets/upload"][:post][:requestBody] = {
         required: true,
@@ -1410,7 +2172,8 @@ module Openapi
       end
       paths["/v1/admin/assets/{id}/compress"] = {
         post: operation(tags: "Admin / Assets", summary: "Manually trigger background compression for an asset",
-                        parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
+                        parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ],
+                        success_schema: ref(:asset_operation_response))
       }
       paths["/v1/admin/assets/{id}/download"] = {
         get: operation(tags: "Admin / Assets", summary: "Get a signed attachment URL for an asset",
@@ -1418,10 +2181,12 @@ module Openapi
       }
       paths["/v1/admin/assets/{id}/thumbnail/regenerate"] = {
         post: operation(tags: "Admin / Assets", summary: "Queue video thumbnail regeneration",
-                        success: 202, parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ])
+                        success: 202, parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422 ],
+                        success_schema: ref(:asset_operation_response))
       }
       paths["/v1/admin/assets/{id}/thumbnail/upload"] = {
-        post: operation(tags: "Admin / Assets", summary: "Upload and replace a video thumbnail",
+        post: operation(tags: "Admin / Assets", summary: "Upload and replace a thumbnail for a compressible video or audio asset",
+                        description: "Stores image thumbnails as uploaded. SVG thumbnails are queued for PNG conversion by the media worker. Limited by MEDIA_MAX_IMAGE_SIZE_MB.",
                         parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422, 500 ])
       }
       paths["/v1/admin/assets/{id}/thumbnail/upload"][:post][:requestBody] = {
@@ -1432,57 +2197,173 @@ module Openapi
           }
         }
       }
+      paths["/v1/admin/assets/{id}/subtitle/upload"] = {
+        post: operation(tags: "Admin / Assets", summary: "Upload an SRT subtitle for a compressible video or audio asset",
+                        description: "Accepts an SRT file, stores it as type/format subtitle using raw object storage, and limits it with MEDIA_MAX_OTHER_SIZE_MB. Subtitle files require no media processing.",
+                        parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404, 422, 500 ])
+      }
+      paths["/v1/admin/assets/{id}/subtitle/upload"][:post][:requestBody] = {
+        required: true,
+        content: {
+          "multipart/form-data" => {
+            schema: ref(:asset_subtitle_upload_request)
+          }
+        }
+      }
 
       paths["/v1/assets"] = {
-        get: operation(tags: "Assets", summary: "List stored assets", errors: [ 401, 403 ]),
+        get: operation(tags: "Assets", summary: "List stored assets",
+                       description: "Optional type filter matches AssetType (#{AssetConstants::AssetType::ALL.join(', ')}).",
+                       parameters: [
+                         query_parameter(:type, enum: AssetConstants::AssetType::ALL, description: "Filter by asset type"),
+                         query_parameter(:record_scope, enum: AssetConstants::RecordScope::VALUES,
+                                                        description: "parents returns only top-level assets, children returns thumbnails/subtitles, all returns both."),
+                         query_parameter(:page, type: :integer),
+                         query_parameter(:limit, type: :integer)
+                       ],
+                       security: nil, errors: []),
         post: operation(tags: "Assets", summary: "Create an asset record", success: 201,
                         body: ref(:asset_request), errors: [ 401, 403, 422 ])
       }
       paths["/v1/assets/{id}"] = {
         get: operation(tags: "Assets", summary: "Get asset record",
-                       parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ]),
+                       security: nil, parameters: [ path_parameter(:id) ], errors: [ 404 ]),
         patch: operation(tags: "Assets", summary: "Update asset record",
                          parameters: [ path_parameter(:id) ], body: ref(:asset_update_request), errors: [ 401, 403, 404, 422 ]),
         delete: operation(tags: "Assets", summary: "Delete asset record",
                           parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
       }
+      paths["/v1/assets/{id}/playback"] = {
+        get: operation(tags: "Assets", summary: "Get progressive playback delivery URL",
+                       description: "Authorizes the logical asset and returns a short-lived provider-backed playback URL. Core does not proxy media bytes for the Garage production path.",
+                       parameters: [ path_parameter(:id) ],
+                       errors: [ 401, 403, 404, 409, 422, 503 ],
+                       success_schema: ref(:asset_playback_response))
+      }
+      paths["/v1/assets/{id}/subtitles/{subtitle_id}"] = {
+        get: operation(tags: "Assets", summary: "Stream subtitle file normalized as WebVTT",
+                       description: "Serves the subtitle file for the specified asset normalized to standard WebVTT format (text/vtt; charset=utf-8). Fallback endpoint for external or standalone media players.",
+                       parameters: [ path_parameter(:id), path_parameter(:subtitle_id) ],
+                       errors: [ 401, 403, 404, 503 ])
+      }
+
+      paths["/v1/notifications"] = {
+        get: operation(tags: "Notifications", summary: "List the current user's in-app notifications",
+                       parameters: [ query_parameter(:filter), query_parameter(:page, type: :integer),
+                                     query_parameter(:limit, type: :integer) ], errors: [ 401 ])
+      }
+      paths["/v1/notifications/unread_count"] = {
+        get: operation(tags: "Notifications", summary: "Get the current user's unread notification count",
+                       errors: [ 401 ])
+      }
+      paths["/v1/notifications/read_all"] = {
+        put: operation(tags: "Notifications", summary: "Mark all current-user notifications as read",
+                       errors: [ 401 ])
+      }
+      paths["/v1/notifications/{id}/read"] = {
+        put: operation(tags: "Notifications", summary: "Mark a current-user notification as read",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 404 ])
+      }
+      paths["/v1/notifications/{id}"] = {
+        delete: operation(tags: "Notifications", summary: "Remove a current-user notification",
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 404 ])
+      }
 
       room_parameter = query_parameter(:room_id, required: false, format: :uuid,
                                        description: "Uses or creates the current room when omitted")
-      paths["/v1/ai/chat"] = {
-        post: operation(tags: "AI", summary: "Persist and queue a message for an AI room",
-                        body: ref(:ai_chat_request), errors: [ 401, 422, 500, 503 ])
+      paths["/v1/chat/messages"] = {
+        get: operation(tags: "Chat", summary: "Get room message history",
+                       parameters: [
+                         room_parameter,
+                         query_parameter(:page, type: :integer),
+                         query_parameter(:limit, type: :integer)
+                       ], errors: [ 401, 404 ]),
+        post: operation(tags: "Chat", summary: "Persist and queue a message for a chat room",
+                        body: ref(:ai_chat_request), errors: [ 401, 422, 500, 503 ],
+                        success_schema: ref(:ai_chat_response))
       }
-      paths["/v1/ai/history"] = {
-        get: operation(tags: "AI", summary: "Get room message history", parameters: [ room_parameter ], errors: [ 401, 404 ])
+      paths["/v1/chat/messages/destroy_all"] = {
+        delete: operation(tags: "Chat", summary: "Clear a room's messages", parameters: [ room_parameter ], errors: [ 401, 404 ])
       }
-      paths["/v1/ai/clear"] = {
-        delete: operation(tags: "AI", summary: "Clear a room's messages", parameters: [ room_parameter ], errors: [ 401, 404 ])
-      }
-      paths["/v1/ai/rename"] = {
-        put: operation(tags: "AI", summary: "Rename a room",
-                       body: ref(:ai_rename_request),
-                       errors: [ 401, 404, 422 ])
-      }
-      paths["/v1/ai/rooms"] = {
-        get: operation(tags: "AI", summary: "List AI rooms", errors: [ 401 ]),
-        post: operation(tags: "AI", summary: "Create an AI room", success: 201,
-                        body: ref(:ai_room_request), errors: [ 401, 422 ])
-      }
-      paths["/v1/ai/rooms/{id}"] = {
-        delete: operation(tags: "AI", summary: "Delete an AI room",
+      paths["/v1/chat/messages/{id}"] = {
+        get: operation(tags: "Chat", summary: "Get a chat message",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 404 ]),
+        put: operation(tags: "Chat", summary: "Update a chat message",
+                       parameters: [ path_parameter(:id) ], body: ref(:ai_message_update_request),
+                       errors: [ 401, 404, 422 ]),
+        delete: operation(tags: "Chat", summary: "Delete a chat message",
                           parameters: [ path_parameter(:id) ], errors: [ 401, 404 ])
       }
-      {
-        summarize: ref(:ai_text_request),
-        translate: ref(:ai_translate_request),
-        analyze: ref(:ai_analyze_request)
-      }.each do |action, body|
-        paths["/v1/ai/#{action}"] = {
-          post: operation(tags: "AI", summary: "#{action.to_s.capitalize} text", body: body,
-                          errors: [ 401, 422, 500 ])
-        }
-      end
+      paths["/v1/chat/rooms"] = {
+        get: operation(tags: "Chat", summary: "List chat rooms",
+                       parameters: [
+                         query_parameter(:page, type: :integer),
+                         query_parameter(:limit, type: :integer)
+                       ], errors: [ 401 ]),
+        post: operation(tags: "Chat", summary: "Create a chat room", success: 201,
+                        body: ref(:ai_room_request), errors: [ 401, 422 ])
+      }
+      paths["/v1/chat/rooms/{id}"] = {
+        get: operation(tags: "Chat", summary: "Get a chat room",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 404 ]),
+        put: operation(tags: "Chat", summary: "Update a chat room",
+                       parameters: [ path_parameter(:id) ], body: ref(:ai_room_update_request),
+                       errors: [ 401, 404, 422 ]),
+        delete: operation(tags: "Chat", summary: "Delete a chat room",
+                          parameters: [ path_parameter(:id) ], errors: [ 401, 404 ])
+      }
+
+      paths["/v1/admin/ai/profiles"] = {
+        get: operation(
+          tags: "Admin / AI",
+          summary: "List AI profiles",
+          parameters: [
+            query_parameter(:search, type: :string),
+            query_parameter(:provider, enum: %w[deepseek gemini openai]),
+            query_parameter(:model, type: :string),
+            query_parameter(:status, type: :string),
+            query_parameter(:enabled, type: :boolean),
+            query_parameter(:page, type: :integer),
+            query_parameter(:limit, type: :integer),
+            query_parameter(:sort_by, type: :string),
+            query_parameter(:sort_order, enum: SortConstants::Order::ALL)
+          ],
+          errors: [ 401, 403 ]
+        ),
+        post: operation(tags: "Admin / AI", summary: "Create an AI profile",
+                        body: ref(:ai_profile_create_request), success: 201, errors: [ 401, 403, 422 ])
+      }
+      paths["/v1/admin/ai/profiles/{id}"] = {
+        get: operation(tags: "Admin / AI", summary: "Get an AI profile",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ]),
+        put: operation(tags: "Admin / AI", summary: "Update an AI profile",
+                       parameters: [ path_parameter(:id) ], body: ref(:ai_profile_update_request),
+                       errors: [ 401, 403, 404, 422 ])
+      }
+      paths["/v1/admin/ai/runs"] = {
+        get: operation(
+          tags: "Admin / AI",
+          summary: "List AI runs",
+          parameters: [
+            query_parameter(:feature, type: :string),
+            query_parameter(:status, type: :string),
+            query_parameter(:provider, enum: %w[deepseek gemini openai]),
+            query_parameter(:model, type: :string),
+            query_parameter(:profile_id, type: :string),
+            query_parameter(:user_id, type: :string),
+            query_parameter(:search, type: :string),
+            query_parameter(:page, type: :integer),
+            query_parameter(:limit, type: :integer),
+            query_parameter(:sort_by, type: :string),
+            query_parameter(:sort_order, enum: SortConstants::Order::ALL)
+          ],
+          errors: [ 401, 403 ]
+        )
+      }
+      paths["/v1/admin/ai/runs/{id}"] = {
+        get: operation(tags: "Admin / AI", summary: "Get an AI run",
+                       parameters: [ path_parameter(:id) ], errors: [ 401, 403, 404 ])
+      }
 
       paths["/v1/speech/tts"] = {
         post: operation(

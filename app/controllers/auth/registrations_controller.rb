@@ -2,6 +2,7 @@
 class Auth::RegistrationsController < Devise::RegistrationsController
   respond_to :json
 
+  skip_before_action :enforce_active_platform_session!
   before_action :check_email_provider, only: [ :create ]
 
   private
@@ -11,7 +12,7 @@ class Auth::RegistrationsController < Devise::RegistrationsController
   end
 
   def check_email_provider
-    email = params.dig(:user, :email).to_s.strip.downcase
+    email = sign_up_params[:email].to_s.strip.downcase
     return if email.blank?
 
     user = User.find_by(email: email)
@@ -37,7 +38,7 @@ class Auth::RegistrationsController < Devise::RegistrationsController
         render_json_response(
           status_code: 201,
           message: auth_message(MessageService::Auth::SIGNED_UP),
-          data: { user: UserSerializer.new(resource).serializable_hash[:data][:attributes] }
+          data: UserSerializer.record(resource)
         )
       else
         render_json_response(
