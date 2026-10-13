@@ -45,6 +45,8 @@ module AppConfig
   SERVER_TIMEZONE             = env_or.call("RAILS_TIMEZONE", "UTC").freeze
   CORS_ORIGINS                = env_or.call("CORS_ORIGINS", "").split(",").map(&:strip).reject(&:empty?).freeze
   CORS_ALLOW_LOCALHOST        = env_or.call("CORS_ALLOW_LOCALHOST") == "true"
+  # Extra hosts for production (comma-separated; AtomicOS re-apply).
+  APP_ALLOWED_HOSTS           = env_or.call("APP_ALLOWED_HOSTS", "").split(",").map(&:strip).reject(&:empty?).freeze
   CI                          = !env_or.call("CI").nil?
 
   # ----------------------------------------------------------------------------
@@ -117,7 +119,9 @@ module AppConfig
   GARAGE_CONTAINER_ENABLED    = env_or.call("GARAGE_CONTAINER_ENABLED", "true") == "true"
   MEDIA_MAX_VIDEO_SIZE_MB     = env_or.call("MEDIA_MAX_VIDEO_SIZE_MB", MEDIA_CONTAINER_ENABLED ? "300" : "10").to_i
   MEDIA_MAX_AUDIO_SIZE_MB     = env_or.call("MEDIA_MAX_AUDIO_SIZE_MB", MEDIA_CONTAINER_ENABLED ? "100" : "10").to_i
-  MEDIA_MAX_IMAGE_SIZE_MB     = env_or.call("MEDIA_MAX_IMAGE_SIZE_MB", MEDIA_CONTAINER_ENABLED ? "10" : "1").to_i
+  # Phones routinely shoot past 1 MB — the container-less default rejected
+  # profile photos and attachments (AtomicOS re-apply).
+  MEDIA_MAX_IMAGE_SIZE_MB     = env_or.call("MEDIA_MAX_IMAGE_SIZE_MB", MEDIA_CONTAINER_ENABLED ? "10" : "5").to_i
   MEDIA_MAX_OTHER_SIZE_MB     = env_or.call("MEDIA_MAX_OTHER_SIZE_MB", MEDIA_CONTAINER_ENABLED ? "30" : "30").to_i
   MEDIA_VIDEO_CRF             = env_or.call("MEDIA_VIDEO_CRF", "23").to_i
   MEDIA_VIDEO_PRESET          = env_or.call("MEDIA_VIDEO_PRESET", "medium").freeze
@@ -194,6 +198,26 @@ module AppConfig
   AZURE_SPEECH_VOICE          = env_or.call("AZURE_SPEECH_VOICE", "en-US-AvaNeural")
 
   # ----------------------------------------------------------------------------
+  # 🤖 AI & STT provider routing (AtomicOS re-apply)
+  # ----------------------------------------------------------------------------
+  # The mobile stack routes chat + batch STT through OpenRouter's paid key and
+  # keeps the direct Gemini session for live STT (see SpeechService::OpenRouterSpeech).
+  AI_SERVICE_PROVIDER         = env_or.call("AI_SERVICE_PROVIDER", "deepseek")
+  OPENROUTER_API_KEY          = env_or.call("OPENROUTER_API_KEY", "")
+  OPENROUTER_BASE_URL         = env_or.call("OPENROUTER_BASE_URL", "https://openrouter.ai/api")
+  OPENROUTER_MODEL            = env_or.call("OPENROUTER_MODEL", "google/gemini-3.8-flash")
+  OPENROUTER_FALLBACK_MODEL   = env_or.call("OPENROUTER_FALLBACK_MODEL", "google/gemini-3.5-flash")
+  OPENROUTER_STT_MODEL        = env_or.call("OPENROUTER_STT_MODEL", "google/gemini-3.5-transcribe")
+  SPEECH_STT_PROVIDER         = env_or.call("SPEECH_STT_PROVIDER", "azure")
+
+  GEMINI_STT_MODEL            = env_or.call("GEMINI_STT_MODEL", "gemini-3.5-transcribe")
+  GEMINI_LIVE_MODEL           = env_or.call("GEMINI_LIVE_MODEL", "gemini-3.5-transcribe-live")
+  GEMINI_STT_FALLBACK_MODEL   = env_or.call("GEMINI_STT_FALLBACK_MODEL", "gemini-3.5-flash-lite")
+  GEMINI_CHAT_FALLBACK_MODEL  = env_or.call("GEMINI_CHAT_FALLBACK_MODEL", "gemini-3.5-flash")
+  GEMINI_THINKING_BUDGET      = env_or.call("GEMINI_THINKING_BUDGET", "0").to_i
+  GEMINI_INLINE_MAX_BYTES     = env_or.call("GEMINI_INLINE_MAX_BYTES", (15 * 1024 * 1024).to_s).to_i
+
+  # ----------------------------------------------------------------------------
   # 📊 Telemetry, Client Stores & Observability
   # ----------------------------------------------------------------------------
   DASHBOARD_BASE_URL          = env_or.call("DASHBOARD_BASE_URL", nil)
@@ -213,6 +237,8 @@ module AppConfig
   # ----------------------------------------------------------------------------
   ENFORCE_BOOT_GUARD          = env_or.call("ENFORCE_BOOT_GUARD") == "true"
   TEST_BOOT_GUARD             = env_or.call("TEST_BOOT_GUARD") == "true"
+  # Fixed OTP for tester logins (AtomicOS re-apply).
+  TEST_OTP_CODE               = env_or.call("TEST_OTP_CODE", "")
   QUIET_BOOT                  = env_or.call("QUIET_BOOT") == "true"
 
   # ----------------------------------------------------------------------------

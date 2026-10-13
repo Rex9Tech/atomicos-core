@@ -103,6 +103,10 @@ RailsErrorDashboard.configure do |config|
   config.async_logging = true
   config.async_adapter = :async  # Options: :async (built-in), :sidekiq, :solid_queue
   # To disable: Set config.async_logging = false
+  # Escape hatch for migrations / db:prepare: async enqueueing fails while the
+  # SolidQueue tables don't exist yet (or no worker is running), which aborts
+  # the migration run. Run with RED_SYNC_LOGGING=1 to log errors inline instead.
+  config.async_logging = false if ENV["RED_SYNC_LOGGING"] == "1"
 
   # Backtrace size limiting (100 lines is industry standard: Rollbar, Airbrake, Bugsnag)
   config.max_backtrace_lines = 100
