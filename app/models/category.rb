@@ -26,7 +26,7 @@ class Category < ApplicationRecord
     if base.blank?
       base = name.to_s
                  .downcase
-                 .gsub(/[^\p{L}\p{N}]+/, "-")
+                 .gsub(/[^\p{L}\p{M}\p{N}]+/, "-")
                  .gsub(/\A-+|-+\z/, "")
     end
     base = "molecule" if base.blank?
