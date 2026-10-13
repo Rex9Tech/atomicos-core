@@ -25,6 +25,7 @@ module Ai
         def reset_providers!
           @gemini = nil
           @deepseek = nil
+          @open_router = nil
         end
 
         private
@@ -33,6 +34,8 @@ module Ai
           case name.to_s.downcase
           when AiConstants::Provider::GEMINI
             @gemini ||= Gemini.new
+          when AiConstants::Provider::OPENROUTER
+            @open_router ||= OpenRouter.new
           else
             @deepseek ||= DeepSeek.new
           end

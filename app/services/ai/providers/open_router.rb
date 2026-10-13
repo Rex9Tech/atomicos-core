@@ -1,0 +1,102 @@
+# frozen_string_literal: true
+
+# app/services/ai/providers/open_router.rb
+
+require "net/http"
+require "json"
+require "uri"
+
+module Ai
+  module Providers
+    class OpenRouter < Base
+      LOG_PREFIX = "[OpenRouter]".freeze
+
+      def initialize
+        @api_key = AppConfig::OPENROUTER_API_KEY
+        @base_url = AppConfig::OPENROUTER_BASE_URL.to_s.chomp("/")
+        @default_model = AppConfig::OPENROUTER_MODEL
+      end
+
+      def chat(messages:, model: nil, temperature: AiConstants::Defaults::TEMPERATURE, max_tokens: AiConstants::Defaults::MAX_OUTPUT_TOKENS, timeout_seconds: nil)
+        payload = {
+          model: model.presence || @default_model,
+          messages: messages,
+          temperature: temperature,
+          max_tokens: max_tokens,
+          stream: false
+        }
+
+        uri = URI.parse("#{@base_url}/v1/chat/completions")
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = uri.scheme == "https"
+        http.open_timeout = timeout_seconds if timeout_seconds.present?
+        http.read_timeout = timeout_seconds if timeout_seconds.present?
+
+        request = Net::HTTP::Post.new(uri.path)
+        request["Content-Type"] = "application/json"
+        request["Authorization"] = "Bearer #{@api_key}"
+        request.body = payload.to_json
+
+        response = http.request(request)
+
+        if response.code.to_i == 200
+          JSON.parse(response.body)
+        else
+          Rails.logger.error("[OpenRouter] API Error: #{response.body}")
+          { error: provider_error_message }
+        end
+      rescue => e
+        Rails.logger.error("[OpenRouter] Error: #{e.message}")
+        { error: provider_error_message }
+      end
+
+      def stream_chat(messages:, model: nil, temperature: AiConstants::Defaults::TEMPERATURE, max_tokens: AiConstants::Defaults::MAX_OUTPUT_TOKENS, timeout_seconds: nil, &block)
+        payload = {
+          model: model.presence || @default_model,
+          messages: messages,
+          temperature: temperature,
+          max_tokens: max_tokens,
+          stream: true
+        }
+
+        uri = URI.parse("#{@base_url}/v1/chat/completions")
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = uri.scheme == "https"
+        http.open_timeout = timeout_seconds if timeout_seconds.present?
+        http.read_timeout = timeout_seconds if timeout_seconds.present?
+
+        request = Net::HTTP::Post.new(uri.path)
+        request["Content-Type"] = "application/json"
+        request["Authorization"] = "Bearer #{@api_key}"
+        request.body = payload.to_json
+
+        http.request(request) do |response|
+          response.read_body do |chunk|
+            chunk.to_s.each_line do |line|
+              next unless line.start_with?("data: ")
+              data = line.sub("data: ", "").strip
+              next if data == "[DONE]"
+
+              begin
+                parsed = JSON.parse(data)
+                content = parsed.dig("choices", 0, "delta", "content")
+                yield content if content.present?
+              rescue JSON::ParserError
+                # skip keep-alive frames
+              end
+            end
+          end
+        end
+      rescue => e
+        Rails.logger.error("[OpenRouter] Stream Error: #{e.message}")
+        yield nil
+      end
+
+      private
+
+      def provider_error_message
+        MessageService::Ai.t(MessageService::Ai::PROVIDER_ERROR)
+      end
+    end
+  end
+end

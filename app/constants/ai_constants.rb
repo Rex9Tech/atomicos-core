@@ -7,10 +7,11 @@ module AiConstants
   end
 
   module Provider
-    DEEPSEEK = "deepseek".freeze
-    GEMINI   = "gemini".freeze
+    DEEPSEEK   = "deepseek".freeze
+    GEMINI     = "gemini".freeze
+    OPENROUTER = "openrouter".freeze
 
-    ALL = [ DEEPSEEK, GEMINI ].freeze
+    ALL = [ DEEPSEEK, GEMINI, OPENROUTER ].freeze
   end
 
   module ProfileKey

@@ -69,8 +69,8 @@ module Ai
 
       def create!(attributes)
         attrs = attributes.to_h.symbolize_keys
-        attrs[:provider] = attrs[:provider].presence || AiConstants::Provider::DEEPSEEK
-        attrs[:model] = attrs[:model].presence || AppConfig::DEEPSEEK_MODEL
+        attrs[:provider] = attrs[:provider].presence || default_provider
+        attrs[:model] = attrs[:model].presence || default_model_for(default_provider)
         attrs[:temperature] ||= AiConstants::Defaults::TEMPERATURE
         attrs[:max_output_tokens] ||= AiConstants::Defaults::MAX_OUTPUT_TOKENS
         attrs[:context_max_tokens] ||= AiConstants::Defaults::CONTEXT_MAX_TOKENS
@@ -121,13 +121,26 @@ module Ai
 
       private
 
+      def default_provider
+        candidate = AppConfig::AI_SERVICE_PROVIDER.to_s.downcase
+        AiConstants::Provider::ALL.include?(candidate) ? candidate : AiConstants::Provider::DEEPSEEK
+      end
+
+      def default_model_for(provider)
+        case provider
+        when AiConstants::Provider::OPENROUTER then AppConfig::OPENROUTER_MODEL
+        when AiConstants::Provider::GEMINI then AppConfig::GEMINI_MODEL
+        else AppConfig::DEEPSEEK_MODEL
+        end
+      end
+
       def create_default!(key)
         attributes = DEFAULTS.fetch(key)
         Ai::Profile.find_or_create_by!(key: key) do |profile|
           profile.assign_attributes(
             attributes.merge(
-              provider: AiConstants::Provider::DEEPSEEK,
-              model: AppConfig::DEEPSEEK_MODEL,
+              provider: default_provider,
+              model: default_model_for(default_provider),
               enabled: true,
               timeout_seconds: AiConstants::Defaults::TIMEOUT_SECONDS
             )
