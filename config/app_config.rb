@@ -153,6 +153,10 @@ module AppConfig
   STRIPE_WEBHOOK_SECRET       = env_or.call("STRIPE_WEBHOOK_SECRET", "")
   STRIPE_SUCCESS_URL          = env_or.call("STRIPE_SUCCESS_URL", "http://localhost:4000/success")
   STRIPE_CANCEL_URL           = env_or.call("STRIPE_CANCEL_URL", "http://localhost:4000/cancel")
+  MMPAY_APP_ID                = env_or.call("MMPAY_APP_ID", "")
+  MMPAY_PUBLISHABLE_KEY       = env_or.call("MMPAY_PUBLISHABLE_KEY", "")
+  MMPAY_SECRET_KEY            = env_or.call("MMPAY_SECRET_KEY", "")
+  MMPAY_API_BASE_URL          = env_or.call("MMPAY_API_BASE_URL", "https://ezapi.myanmyanpay.com")
   PAYMENT_BATCH_COUPON_LIMIT  = env_or.call("PAYMENT_BATCH_COUPON_LIMIT", "100").to_i
 
   # ----------------------------------------------------------------------------

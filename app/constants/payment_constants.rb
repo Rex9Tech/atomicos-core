@@ -6,8 +6,9 @@ module PaymentConstants
     STRIPE      = "stripe".freeze
     GOOGLE_PLAY = "google_play".freeze
     APP_STORE   = "app_store".freeze
+    MYANMYANPAY = "myanmyanpay".freeze
     IN_APP      = [ GOOGLE_PLAY, APP_STORE ].freeze
-    ALL         = [ STRIPE, GOOGLE_PLAY, APP_STORE ].freeze
+    ALL         = [ STRIPE, GOOGLE_PLAY, APP_STORE, MYANMYANPAY ].freeze
   end
 
   module StripeApi

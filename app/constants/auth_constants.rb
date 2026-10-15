@@ -15,6 +15,8 @@ module AuthConstants
     FORWARDED_FOR    = "X-Forwarded-For".freeze
     FORWARDED_PROTO  = "X-Forwarded-Proto".freeze
     STRIPE_SIGNATURE = "Stripe-Signature".freeze
+    MMPAY_NONCE      = "x-mmpay-nonce".freeze
+    MMPAY_SIGNATURE  = "x-mmpay-signature".freeze
     CONTENT_TYPE     = "Content-Type".freeze
     HOST             = "Host".freeze
   end

@@ -41,7 +41,10 @@ class Payment::ProcessWebhookJob < ApplicationJob
       webhook_event.start_processing!
     end
 
-    Payment::Providers::Client.process_webhook(webhook_event.payload)
+    Payment::Providers::Client.process_webhook(
+      webhook_event.payload,
+      provider: webhook_event.provider
+    )
 
     webhook_event.mark_as_processed!
 

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_13_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_14_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "uuid-ossp"
@@ -127,6 +127,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_13_190000) do
     t.uuid "updated_by_id"
     t.string "url", null: false
     t.text "extracted_text"
+    t.string "title"
+    t.text "description"
+    t.jsonb "metadata", default: {}, null: false
     t.index ["assetable_type", "assetable_id"], name: "index_assets_on_assetable_type_and_assetable_id"
     t.index ["created_by_id"], name: "index_assets_on_created_by_id"
     t.index ["discarded_at"], name: "index_assets_on_discarded_at"
@@ -134,6 +137,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_13_190000) do
     t.index ["name"], name: "index_assets_on_name"
     t.index ["parent_asset_id"], name: "index_assets_on_parent_asset_id", unique: true
     t.index ["status"], name: "index_assets_on_status"
+    t.index ["title"], name: "index_assets_on_title"
     t.index ["type"], name: "index_assets_on_type"
     t.index ["undiscarded_by_id"], name: "index_assets_on_undiscarded_by_id"
     t.index ["updated_by_id"], name: "index_assets_on_updated_by_id"
@@ -582,26 +586,75 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_13_190000) do
     t.datetime "created_at", null: false
     t.uuid "created_by_id"
     t.string "currency", null: false
-    t.string "cycle"
     t.text "description"
     t.datetime "discarded_at"
     t.uuid "discarded_by_id"
     t.string "name", null: false
-    t.integer "price_unit_amount", null: false
-    t.string "stripe_price_id", null: false
-    t.string "stripe_product_id", null: false
+    t.string "stripe_price_id"
+    t.string "stripe_product_id"
     t.datetime "undiscarded_at"
     t.uuid "undiscarded_by_id"
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
+    t.integer "unit_amount"
+    t.string "interval"
+    t.string "google_play_product_id"
+    t.string "app_store_product_id"
+    t.index ["app_store_product_id"], name: "index_payment_products_on_app_store_product_id", unique: true
     t.index ["code"], name: "index_payment_products_on_code", unique: true
     t.index ["created_by_id"], name: "index_payment_products_on_created_by_id"
     t.index ["discarded_at"], name: "index_payment_products_on_discarded_at"
     t.index ["discarded_by_id"], name: "index_payment_products_on_discarded_by_id"
+    t.index ["google_play_product_id"], name: "index_payment_products_on_google_play_product_id", unique: true
     t.index ["stripe_price_id"], name: "index_payment_products_on_stripe_price_id", unique: true
     t.index ["stripe_product_id"], name: "index_payment_products_on_stripe_product_id", unique: true
     t.index ["undiscarded_by_id"], name: "index_payment_products_on_undiscarded_by_id"
     t.index ["updated_by_id"], name: "index_payment_products_on_updated_by_id"
+  end
+
+  create_table "payment_purchases", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "user_id", null: false
+    t.uuid "product_id", null: false
+    t.string "provider", default: "stripe", null: false
+    t.string "provider_payment_id", null: false
+    t.string "provider_charge_id"
+    t.string "provider_customer_id"
+    t.string "payment_method_id"
+    t.string "payment_method_type"
+    t.jsonb "payment_method_details", default: {}
+    t.string "currency", null: false
+    t.integer "unit_amount", null: false
+    t.string "status", default: "requires_payment_method", null: false
+    t.string "client_secret"
+    t.jsonb "metadata", default: {}
+    t.datetime "paid_at"
+    t.datetime "refunded_at"
+    t.datetime "canceled_at"
+    t.datetime "processing_at"
+    t.integer "amount_received", default: 0
+    t.integer "amount_capturable", default: 0
+    t.uuid "created_by_id"
+    t.uuid "updated_by_id"
+    t.uuid "discarded_by_id"
+    t.uuid "undiscarded_by_id"
+    t.datetime "discarded_at"
+    t.datetime "undiscarded_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_at"], name: "index_payment_purchases_on_created_at"
+    t.index ["created_by_id"], name: "index_payment_purchases_on_created_by_id"
+    t.index ["discarded_at"], name: "index_payment_purchases_on_discarded_at"
+    t.index ["discarded_by_id"], name: "index_payment_purchases_on_discarded_by_id"
+    t.index ["payment_method_type"], name: "index_payment_purchases_on_payment_method_type"
+    t.index ["product_id"], name: "index_payment_purchases_on_product_id"
+    t.index ["provider"], name: "index_payment_purchases_on_provider"
+    t.index ["provider_charge_id"], name: "index_payment_purchases_on_provider_charge_id", unique: true
+    t.index ["provider_payment_id"], name: "index_payment_purchases_on_provider_payment_id", unique: true
+    t.index ["status"], name: "index_payment_purchases_on_status"
+    t.index ["undiscarded_by_id"], name: "index_payment_purchases_on_undiscarded_by_id"
+    t.index ["updated_by_id"], name: "index_payment_purchases_on_updated_by_id"
+    t.index ["user_id", "created_at"], name: "index_payment_purchases_on_user_id_and_created_at"
+    t.index ["user_id"], name: "index_payment_purchases_on_user_id"
   end
 
   create_table "payment_subscriptions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -612,7 +665,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_13_190000) do
     t.uuid "created_by_id"
     t.datetime "current_period_end"
     t.datetime "current_period_start"
-    t.string "cycle", null: false
     t.datetime "discarded_at"
     t.uuid "discarded_by_id"
     t.datetime "ended_at"
@@ -623,20 +675,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_13_190000) do
     t.uuid "product_id", null: false
     t.datetime "started_at"
     t.string "status", default: "incomplete", null: false
-    t.string "stripe_customer_id"
-    t.string "stripe_subscription_id", null: false
     t.datetime "undiscarded_at"
     t.uuid "undiscarded_by_id"
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
     t.uuid "user_id", null: false
+    t.string "provider", default: "stripe"
+    t.string "provider_subscription_id"
+    t.string "provider_customer_id"
+    t.string "provider_subscription_item_id"
+    t.string "provider_price_id"
+    t.string "currency"
+    t.integer "unit_amount"
+    t.integer "quantity", default: 1
+    t.string "interval"
+    t.integer "interval_count", default: 1
     t.index ["created_by_id"], name: "index_payment_subscriptions_on_created_by_id"
     t.index ["current_period_end"], name: "index_payment_subscriptions_on_current_period_end"
     t.index ["discarded_at"], name: "index_payment_subscriptions_on_discarded_at"
     t.index ["discarded_by_id"], name: "index_payment_subscriptions_on_discarded_by_id"
     t.index ["product_id"], name: "index_payment_subscriptions_on_product_id"
     t.index ["status"], name: "index_payment_subscriptions_on_status"
-    t.index ["stripe_subscription_id"], name: "index_payment_subscriptions_on_stripe_subscription_id", unique: true
     t.index ["undiscarded_by_id"], name: "index_payment_subscriptions_on_undiscarded_by_id"
     t.index ["updated_by_id"], name: "index_payment_subscriptions_on_updated_by_id"
     t.index ["user_id", "status"], name: "index_payment_subscriptions_on_user_id_and_status"
@@ -700,18 +759,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_13_190000) do
     t.datetime "processing_started_at"
     t.datetime "received_at", null: false
     t.string "status", default: "pending", null: false
-    t.string "stripe_event_id", null: false
     t.datetime "undiscarded_at"
     t.uuid "undiscarded_by_id"
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
+    t.string "provider", default: "stripe", null: false
+    t.string "provider_event_id", null: false
     t.index ["created_by_id"], name: "index_payment_webhook_events_on_created_by_id"
     t.index ["discarded_by_id"], name: "index_payment_webhook_events_on_discarded_by_id"
     t.index ["event_type"], name: "index_payment_webhook_events_on_event_type"
+    t.index ["provider"], name: "index_payment_webhook_events_on_provider"
+    t.index ["provider_event_id"], name: "index_payment_webhook_events_on_provider_event_id", unique: true
     t.index ["received_at"], name: "index_payment_webhook_events_on_received_at"
     t.index ["status", "received_at"], name: "index_payment_webhook_events_on_status_and_received_at"
     t.index ["status"], name: "index_payment_webhook_events_on_status"
-    t.index ["stripe_event_id"], name: "index_payment_webhook_events_on_stripe_event_id", unique: true
     t.index ["undiscarded_by_id"], name: "index_payment_webhook_events_on_undiscarded_by_id"
     t.index ["updated_by_id"], name: "index_payment_webhook_events_on_updated_by_id"
   end

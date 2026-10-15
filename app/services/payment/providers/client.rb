@@ -82,6 +82,7 @@ module Payment
           @stripe = nil
           @google_play = nil
           @app_store = nil
+          @myanmyanpay = nil
         end
 
         private
@@ -145,6 +146,8 @@ module Payment
             @google_play ||= GooglePlay.new
           when PaymentConstants::Provider::APP_STORE
             @app_store ||= AppStore.new
+          when PaymentConstants::Provider::MYANMYANPAY
+            @myanmyanpay ||= Myanmyanpay.new
           else
             stripe_provider
           end

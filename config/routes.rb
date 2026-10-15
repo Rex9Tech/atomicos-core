@@ -121,6 +121,7 @@ Rails.application.routes.draw do
 
   # ===== WEBHOOKS =====
   post "webhooks/stripe", to: "webhooks/stripe#create"
+  post "webhooks/myanmyanpay", to: "webhooks/myanmyanpay#create"
 
   # ============================================================
   # API V1 - All API routes should be API-only (no new/edit)
