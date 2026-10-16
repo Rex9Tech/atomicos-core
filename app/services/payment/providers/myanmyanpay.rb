@@ -29,6 +29,11 @@ module Payment
       TERMINAL_STATUSES = [ FAILED_STATUS, REFUNDED_STATUS, CANCELLED_STATUS, EXPIRED_STATUS ].freeze
       HEARTBEAT_CONDITION = "TOUCHED".freeze
 
+      # How long a created (still PENDING) MMQR stays valid & resumable.
+      # Refresh/resume re-displays the SAME stored QR — never a second create.
+      RESUME_WINDOW = 15.minutes
+      CHECKOUT_LOG_PREFIX = "[MMPay Checkout]".freeze
+
       Error = Class.new(StandardError)
 
       # ===== Webhook (callback) verification =====
@@ -151,6 +156,125 @@ module Payment
         )
       end
 
+      # ===== Checkout rail (create the MMQR shown in the client) =====
+      #
+      # Mirrors the shape of the Stripe provider's create_checkout_session so
+      # Payment::Providers::Client can route by provider. Returns:
+      #   { qr:, order_id:, transaction_ref_id:, amount:, currency:, expires_at:, resumed:, purchase_id:, product_id: }
+      # The QR payload is stored verbatim on the purchase (metadata) so that
+      # refresh/resume re-displays the SAME QR without a second create.
+      def create_checkout_session(user_id:, product_id:, success_url: nil, cancel_url: nil, coupon: nil, final_amount: nil, **)
+        product = Payment::Product.find(product_id)
+
+        live = live_pending_purchase(user_id: user_id, product_id: product_id)
+        if live && live.metadata&.dig("qr").present?
+          return checkout_payload(live, resumed: true)
+        end
+        # A stale pending attempt (no QR / window elapsed) is closed out so the
+        # books stay clean and a fresh QR can be issued.
+        if live
+          live.update!(
+            status: PaymentConstants::PurchaseStatus::CANCELED,
+            canceled_at: Time.current,
+            metadata: (live.metadata || {}).merge("stale" => true)
+          )
+        end
+
+        amount = final_amount.to_i.positive? ? final_amount.to_i : product.unit_amount.to_i
+        order_ref = "AZ-#{SecureRandom.alphanumeric(8).upcase}"
+
+        response = create_payment(
+          order_id: order_ref,
+          amount: amount,
+          callback_url: webhook_url,
+          items: [ { "name" => product.name.to_s.truncate(100), "amount" => amount, "quantity" => 1 } ],
+          custom_message: "#{product.name} | #{order_ref}"
+        )
+
+        qr = response["qr"].to_s
+        raise Error, "#{CHECKOUT_LOG_PREFIX} gateway create returned no QR payload" if qr.empty?
+
+        transaction_ref = response["transactionRefId"].presence || order_ref
+
+        purchase = Payment::Purchase.create!(
+          user_id: user_id,
+          product_id: product.id,
+          provider: PaymentConstants::Provider::MYANMYANPAY,
+          provider_payment_id: transaction_ref,
+          unit_amount: amount,
+          amount_received: 0,
+          amount_capturable: 0,
+          currency: product.currency,
+          status: PaymentConstants::PurchaseStatus::PROCESSING,
+          metadata: {
+            "order_id" => order_ref,
+            "qr" => qr,
+            "coupon_code" => coupon&.code,
+            "original_amount" => product.unit_amount.to_i,
+            "requested_via" => "checkout"
+          }.compact
+        )
+
+        checkout_payload(purchase, resumed: false)
+      rescue Error => e
+        Rails.logger.error("#{CHECKOUT_LOG_PREFIX} create failed: #{e.message}")
+        { error: e.message }
+      rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+        Rails.logger.error("#{CHECKOUT_LOG_PREFIX} persist failed: #{e.class} #{e.message}")
+        { error: "Unable to record the payment session. Please try again." }
+      end
+
+      # ===== Entitlement fulfilment (runs from process_webhook on SUCCESS) =====
+      #
+      # Idempotent: grants + the "entitlement_granted" claim flag commit in ONE
+      # transaction, so a crash rolls everything back and the webhook retry (or
+      # the replay path) re-runs cleanly without double coupon accounting.
+      def grant_entitlement(purchase)
+        product = purchase.product
+        if product.nil? || purchase.user.nil?
+          Rails.logger.warn("#{LOG_PREFIX} Purchase #{purchase.id} missing product/user — nothing to grant")
+          return
+        end
+
+        metadata_updates = {}
+
+        ActiveRecord::Base.transaction do
+          begin
+            apply_coupon_if_any(purchase)
+          rescue StandardError => e
+            Rails.logger.error("#{LOG_PREFIX} Coupon apply failed for purchase #{purchase.id}: #{e.message}")
+            metadata_updates["coupon_apply_failed"] = true
+          end
+
+          if product.recurring?
+            grant_period_subscription(purchase, product)
+          else
+            AccessService.grant(
+              user_id: purchase.user_id,
+              product_id: product.id,
+              expires_at: nil
+            )
+          end
+
+          purchase.update_columns(
+            metadata: (purchase.metadata || {})
+                        .merge(metadata_updates)
+                        .merge("entitlement_granted" => true)
+          )
+        end
+
+        begin
+          NotificationService::Center.payment_success(purchase.user, product, purchase)
+        rescue StandardError => e
+          Rails.logger.error("#{LOG_PREFIX} payment_success notification failed for #{purchase.id}: #{e.message}")
+        end
+      end
+
+      def entitlement_granted?(purchase)
+        purchase.metadata&.dig("entitlement_granted") == true ||
+          purchase.metadata&.dig("entitlement_granted") == "true"
+      end
+
       private
 
       def status_of(payload)
@@ -173,6 +297,8 @@ module Payment
 
       def finalize_success(purchase, payload)
         if purchase.succeeded?
+          # Retry safety: finish a grant a previous attempt may have interrupted.
+          grant_entitlement(purchase) unless entitlement_granted?(purchase)
           Rails.logger.info("#{LOG_PREFIX} Replay on already-paid purchase #{purchase.id} — no-op")
           return { processed: true, status: SUCCESS_STATUS, action: "duplicate" }
         end
@@ -210,6 +336,7 @@ module Payment
         Rails.logger.info(
           "#{LOG_PREFIX} Purchase #{purchase.id} marked paid (order #{payload["orderId"]})"
         )
+        grant_entitlement(purchase)
         { processed: true, status: SUCCESS_STATUS, action: "paid" }
       end
 
@@ -253,6 +380,120 @@ module Payment
         cancel_payment(order_id: order_ref)
       rescue StandardError => e
         Rails.logger.warn("#{LOG_PREFIX} Best-effort gateway cancel failed for #{order_ref}: #{e.message}")
+      end
+
+      # Most recent still-open checkout attempt inside the resume window.
+      def live_pending_purchase(user_id:, product_id:)
+        Payment::Purchase
+          .where(
+            provider: PaymentConstants::Provider::MYANMYANPAY,
+            user_id: user_id,
+            product_id: product_id,
+            status: PaymentConstants::PurchaseStatus::PROCESSING
+          )
+          .where("created_at > ?", RESUME_WINDOW.ago)
+          .order(created_at: :desc)
+          .first
+      end
+
+      def checkout_payload(purchase, resumed:)
+        {
+          qr: purchase.metadata["qr"],
+          order_id: purchase.metadata["order_id"].presence || purchase.provider_payment_id,
+          transaction_ref_id: purchase.provider_payment_id,
+          amount: purchase.unit_amount,
+          currency: purchase.currency.to_s.upcase,
+          expires_at: (purchase.created_at + RESUME_WINDOW).utc.iso8601,
+          resumed: resumed,
+          purchase_id: purchase.id,
+          product_id: purchase.product_id
+        }
+      end
+
+      def apply_coupon_if_any(purchase)
+        code = purchase.metadata&.dig("coupon_code").to_s
+        return if code.empty?
+
+        coupon = Payment::Coupon.find_by(code: code) ||
+                 Payment::Coupon.find_by(code: code.upcase)
+        return if coupon.nil?
+
+        CouponService.apply_to_checkout!(
+          user: purchase.user,
+          product: purchase.product,
+          coupon: coupon,
+          payment_id: purchase.id,
+          payment_type: :purchase
+        )
+      end
+
+      # MMQR is one-shot: recurring products are fulfilled as MANUAL-RENEWAL
+      # period subscriptions — each successful payment extends the period.
+      def grant_period_subscription(purchase, product)
+        user = purchase.user
+        subscription = Payment::Subscription.find_or_initialize_by(
+          provider: PaymentConstants::Provider::MYANMYANPAY,
+          provider_subscription_id: "mmpay-#{user.id}-#{product.id}"
+        )
+
+        # Same payment already applied (retry) — skip period math.
+        return subscription if subscription.persisted? &&
+                               subscription.metadata&.dig("last_purchase_id") == purchase.id
+
+        new_subscription = subscription.new_record?
+        now = Time.current
+        interval = product.interval_in_duration
+
+        if subscription.current_period_end.present? && subscription.current_period_end > now
+          new_start = subscription.current_period_start || now
+          new_end = subscription.current_period_end + interval
+        else
+          new_start = now
+          new_end = now + interval
+        end
+
+        subscription.assign_attributes(
+          user_id: user.id,
+          product_id: product.id,
+          status: PaymentConstants::SubscriptionStatus::ACTIVE,
+          currency: product.currency,
+          interval: product.interval,
+          interval_count: 1,
+          unit_amount: purchase.unit_amount.to_i,
+          quantity: 1,
+          started_at: subscription.started_at || now,
+          current_period_start: new_start,
+          current_period_end: new_end,
+          cancel_at_period_end: false,
+          metadata: (subscription.metadata || {}).merge(
+            "last_purchase_id" => purchase.id,
+            "last_order_id" => purchase.metadata&.dig("order_id"),
+            "manual_renewal" => true
+          )
+        )
+        subscription.save!
+
+        AccessService.grant(
+          user_id: user.id,
+          product_id: product.id,
+          expires_at: new_end
+        )
+
+        if new_subscription
+          begin
+            NotificationService::Center.subscription_created(user, product, subscription)
+          rescue StandardError => e
+            Rails.logger.error("#{LOG_PREFIX} subscription_created notification failed: #{e.message}")
+          end
+        end
+
+        subscription
+      end
+
+      def webhook_url
+        base = AppConfig::SERVER_BASE_URL.to_s
+        base = "https://atomicos-core.khantsithu.tech" if base.blank? || base.include?("localhost")
+        "#{base.chomp('/')}/webhooks/myanmyanpay"
       end
 
       def configured?

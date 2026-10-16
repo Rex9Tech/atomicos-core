@@ -6,7 +6,6 @@ module Payment
     class Client
       class << self
         delegate :create_customer,
-                 :create_checkout_session,
                  :get_session,
                  :cancel_subscription,
                  :resume_subscription,
@@ -17,10 +16,17 @@ module Payment
                  :destroy_coupon,
                  to: :stripe_provider
 
+        # Route checkout creation by provider. Stripe (the default) returns a
+        # checkout_url to redirect to; MyanMyanPay returns an MMQR payload the
+        # client renders as the QR to scan.
+        def create_checkout_session(provider: nil, **kwargs)
+          provider(provider).create_checkout_session(**kwargs)
+        end
+
         def create_product(attributes)
           if attributes[:unit_amount].to_i.zero?
             create_local_product(attributes.merge(unit_amount: 0, interval: nil))
-          elsif in_app_only_product?(attributes)
+          elsif in_app_only_product?(attributes) || mmpay_product?(attributes)
             create_local_product(attributes)
           else
             stripe_provider.create_product(attributes)
@@ -93,6 +99,10 @@ module Payment
             (attributes[:google_play_product_id].present? || attributes[:app_store_product_id].present?)
         end
 
+        def mmpay_product?(attributes)
+          ActiveModel::Type::Boolean.new.cast(attributes[:available_on_myanmyanpay]) == true
+        end
+
         def create_local_product(attributes)
           product = Payment::Product.new(
             name: attributes[:name],
@@ -105,7 +115,8 @@ module Payment
             stripe_product_id: attributes[:stripe_product_id],
             stripe_price_id: attributes[:stripe_price_id],
             google_play_product_id: attributes[:google_play_product_id],
-            app_store_product_id: attributes[:app_store_product_id]
+            app_store_product_id: attributes[:app_store_product_id],
+            available_on_myanmyanpay: ActiveModel::Type::Boolean.new.cast(attributes[:available_on_myanmyanpay]) || false
           )
           if product.save
             { data: product }
@@ -125,7 +136,7 @@ module Payment
 
           allowed_attrs = attributes.slice(
             :name, :description, :unit_amount, :currency, :interval, :active,
-            :google_play_product_id, :app_store_product_id
+            :google_play_product_id, :app_store_product_id, :available_on_myanmyanpay
           )
           product.assign_attributes(allowed_attrs)
           if product.save

@@ -1,6 +1,7 @@
 class Payment::ProductSerializer < ApplicationSerializer
   attributes :id, :code, :name, :description, :unit_amount, :currency, :interval,
              :stripe_product_id, :stripe_price_id, :google_play_product_id, :app_store_product_id,
+             :available_on_myanmyanpay,
              :active, :created_at, :updated_at, :discarded_at, :undiscarded_at
 
   attribute :price do |product|

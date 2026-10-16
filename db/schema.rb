@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_14_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_14_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "uuid-ossp"
@@ -600,6 +600,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_14_120000) do
     t.string "interval"
     t.string "google_play_product_id"
     t.string "app_store_product_id"
+    t.boolean "available_on_myanmyanpay", default: false, null: false
     t.index ["app_store_product_id"], name: "index_payment_products_on_app_store_product_id", unique: true
     t.index ["code"], name: "index_payment_products_on_code", unique: true
     t.index ["created_by_id"], name: "index_payment_products_on_created_by_id"

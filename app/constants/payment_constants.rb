@@ -197,6 +197,15 @@ module PaymentConstants
     MMK = "mmk".freeze
     SGD = "sgd".freeze
     ALL = [ USD, MMK, SGD ].freeze
+
+    # Currencies whose amounts are stored as WHOLE units (no minor unit) and
+    # displayed without /100 scaling. MMK has no practical subunit; the MMQR
+    # gateway expects whole-kyat amounts, so unit_amount IS the kyat value.
+    ZERO_DECIMAL = [ MMK ].freeze
+
+    def self.zero_decimal?(currency)
+      ZERO_DECIMAL.include?(currency.to_s.downcase)
+    end
   end
 
   module SyncStatus

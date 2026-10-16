@@ -121,7 +121,11 @@ class Payment::Purchase < ApplicationRecord
 
   # Display price with currency
   def display_price
-    format("%s %.2f", currency.upcase, unit_amount / 100.0)
+    if PaymentConstants::Currency.zero_decimal?(currency)
+      "#{currency.upcase} #{ActiveSupport::NumberHelper.number_to_delimited(unit_amount.to_i)}"
+    else
+      format("%s %.2f", currency.upcase, unit_amount / 100.0)
+    end
   end
 
   # Payment method display

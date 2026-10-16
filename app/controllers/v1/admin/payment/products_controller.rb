@@ -129,7 +129,7 @@ class V1::Admin::Payment::ProductsController < V1::ApplicationController
           .permit(
             :code, :name, :description, :unit_amount, :currency, :interval, :active,
             :thumbnail_asset_id, :stripe_product_id, :stripe_price_id,
-            :google_play_product_id, :app_store_product_id
+            :google_play_product_id, :app_store_product_id, :available_on_myanmyanpay
           )
           .to_h
           .symbolize_keys

@@ -68,6 +68,7 @@ class Payment::Product < ApplicationRecord
   scope :for_google_play, -> { where.not(google_play_product_id: nil) }
   scope :for_app_store, -> { where.not(app_store_product_id: nil) }
   scope :for_in_app, -> { where.not(google_play_product_id: nil).or(where.not(app_store_product_id: nil)) }
+  scope :for_myanmyanpay, -> { where(available_on_myanmyanpay: true) }
 
   before_discard :deactivate
 
@@ -109,6 +110,7 @@ class Payment::Product < ApplicationRecord
     providers << PaymentConstants::Provider::STRIPE if available_on_stripe?
     providers << PaymentConstants::Provider::GOOGLE_PLAY if available_on_google_play?
     providers << PaymentConstants::Provider::APP_STORE if available_on_app_store?
+    providers << PaymentConstants::Provider::MYANMYANPAY if available_on_myanmyanpay?
     providers
   end
 
@@ -123,7 +125,11 @@ class Payment::Product < ApplicationRecord
   def display_price
     return "Free" if free?
 
-    format("%s %.2f", currency.upcase, unit_amount / 100.0)
+    if PaymentConstants::Currency.zero_decimal?(currency)
+      "#{currency.upcase} #{ActiveSupport::NumberHelper.number_to_delimited(unit_amount.to_i)}"
+    else
+      format("%s %.2f", currency.upcase, unit_amount / 100.0)
+    end
   end
 
   def interval_in_duration
@@ -190,10 +196,10 @@ class Payment::Product < ApplicationRecord
   end
 
   def validate_store_identifiers
-    return if free?
+    return if free? || available_on_myanmyanpay?
 
     if stripe_price_id.blank? && google_play_product_id.blank? && app_store_product_id.blank?
-      errors.add(:base, "Premium products must define at least one store identifier (Stripe, Google Play, or App Store)")
+      errors.add(:base, "Premium products must define at least one store identifier (Stripe, Google Play, App Store, or MyanMyanPay)")
     end
   end
 
