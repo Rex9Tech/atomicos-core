@@ -8,7 +8,7 @@ class AddCreditsSystem < ActiveRecord::Migration[8.1]
     add_column :users, :credits, :integer, default: 0, null: false, if_not_exists: true
     add_column :payment_products, :credits, :integer, default: 0, null: false, if_not_exists: true
 
-    create_table :credit_transactions, id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade, if_not_exists: true do |t|
+    create_table :credit_transactions, id: :uuid, default: -> { "gen_random_uuid()" }, if_not_exists: true do |t|
       t.references :user, type: :uuid, null: false, foreign_key: true, index: false
       t.integer :amount, null: false          # positive = granted, negative = spent
       t.integer :balance_after, null: false
