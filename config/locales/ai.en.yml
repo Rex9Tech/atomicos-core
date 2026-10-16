@@ -8,6 +8,7 @@ en:
     title_parameter_missing: "Missing title parameter"
     service_error: "AI service error"
     provider_error: "AI service is temporarily unavailable"
+    insufficient_credits: "You're out of credits. Top up in Plans & Pricing to continue."
     response_generated: "AI response generated"
     message_sent: "Message sent"
     no_response: "No response"

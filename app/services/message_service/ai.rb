@@ -27,6 +27,7 @@ module MessageService
     CHANNEL_CONNECTED = "ai.channel_connected"
     RESPONSE_QUEUED = "ai.response_queued"
     ALREADY_PROCESSING = "ai.already_processing"
+    INSUFFICIENT_CREDITS = "ai.insufficient_credits"
     RESPONSE_READY = "ai.response_ready"
     RESPONSE_READY_CONTEXT = "ai.response_ready_context"
     RESPONSE_FAILED = "ai.response_failed"

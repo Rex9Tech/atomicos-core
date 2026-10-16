@@ -153,6 +153,10 @@ module AppConfig
   STRIPE_WEBHOOK_SECRET       = env_or.call("STRIPE_WEBHOOK_SECRET", "")
   STRIPE_SUCCESS_URL          = env_or.call("STRIPE_SUCCESS_URL", "http://localhost:4000/success")
   STRIPE_CANCEL_URL           = env_or.call("STRIPE_CANCEL_URL", "http://localhost:4000/cancel")
+
+  # ===== Credits =====
+  FREE_USER_CREDITS           = env_or.call("FREE_USER_CREDITS", "100").to_i
+  AI_CHAT_CREDIT_COST         = env_or.call("AI_CHAT_CREDIT_COST", "1").to_i
   MMPAY_APP_ID                = env_or.call("MMPAY_APP_ID", "")
   MMPAY_PUBLISHABLE_KEY       = env_or.call("MMPAY_PUBLISHABLE_KEY", "")
   MMPAY_SECRET_KEY            = env_or.call("MMPAY_SECRET_KEY", "")

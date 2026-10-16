@@ -116,6 +116,7 @@ module Payment
             stripe_price_id: attributes[:stripe_price_id],
             google_play_product_id: attributes[:google_play_product_id],
             app_store_product_id: attributes[:app_store_product_id],
+            credits: attributes[:credits].to_i,
             available_on_myanmyanpay: ActiveModel::Type::Boolean.new.cast(attributes[:available_on_myanmyanpay]) || false
           )
           if product.save
@@ -136,7 +137,8 @@ module Payment
 
           allowed_attrs = attributes.slice(
             :name, :description, :unit_amount, :currency, :interval, :active,
-            :google_play_product_id, :app_store_product_id, :available_on_myanmyanpay
+            :google_play_product_id, :app_store_product_id, :available_on_myanmyanpay,
+            :credits
           )
           product.assign_attributes(allowed_attrs)
           if product.save

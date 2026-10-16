@@ -46,6 +46,7 @@ class Payment::Product < ApplicationRecord
   validates :code, presence: true, uniqueness: { case_sensitive: true }, format: { with: /\A[A-Za-z0-9]{10}\z/, message: "must be 10 alphanumeric characters" }
   validates :name, presence: true
   validates :unit_amount, numericality: { greater_than_or_equal_to: 0 }
+  validates :credits, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validates :currency, presence: true
   validates :stripe_product_id, uniqueness: true, allow_nil: true
   validates :stripe_price_id, uniqueness: true, allow_nil: true

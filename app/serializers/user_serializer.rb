@@ -1,7 +1,7 @@
 # app/serializers/user_serializer.rb:
 
 class UserSerializer < ApplicationSerializer
-  attributes :id, :email, :username, :name, :provider, :confirmed_at,
+  attributes :id, :email, :username, :name, :provider, :confirmed_at, :credits,
              :created_at, :updated_at, :discarded_at, :undiscarded_at
 
   attribute :confirmed do |user|

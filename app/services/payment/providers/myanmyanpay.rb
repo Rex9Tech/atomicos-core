@@ -256,6 +256,16 @@ module Payment
             )
           end
 
+          credits_to_grant = product.credits.to_i
+          if credits_to_grant.positive?
+            CreditsService.grant!(
+              user: purchase.user,
+              amount: credits_to_grant,
+              source: "purchase:#{purchase.id}",
+              metadata: { "order_id" => purchase.metadata&.dig("order_id") }
+            )
+          end
+
           purchase.update_columns(
             metadata: (purchase.metadata || {})
                         .merge(metadata_updates)

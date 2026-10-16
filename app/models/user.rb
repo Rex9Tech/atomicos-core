@@ -18,6 +18,7 @@ class User < ApplicationRecord
   has_many :roles, through: :user_roles, class_name: "Iam::Role"
   has_many :feedbacks, dependent: :nullify
   has_many :user_notifications, dependent: :destroy
+  has_many :credit_transactions, dependent: :destroy
   has_many :client_user_versions, class_name: "Client::UserVersion", dependent: :destroy
   has_one :latest_user_version, -> { order(last_seen_at: :desc, updated_at: :desc) },
           class_name: "Client::UserVersion"
@@ -32,6 +33,7 @@ class User < ApplicationRecord
   after_create :assign_default_user_role, if: -> { roles.empty? }
   after_create :ensure_default_category
   after_create :create_default_referral_coupon
+  after_create :grant_initial_credits
   after_destroy :cleanup_stripe_customer, if: -> { stripe_customer_id.present? }
 
   self.primary_key = "id"
@@ -171,6 +173,16 @@ class User < ApplicationRecord
     if default_role
       Iam::UserRole.find_or_create_by!(user: self, role: default_role)
     end
+  end
+
+  def grant_initial_credits
+    CreditsService.grant!(
+      user: self,
+      amount: CreditsService.initial_free_credits,
+      source: "signup"
+    )
+  rescue StandardError => e
+    Rails.logger.warn("[User] Initial credit grant skipped: #{e.message}")
   end
 
   def create_default_referral_coupon

@@ -52,6 +52,15 @@ class V1::Payment::PaymentsController < V1::ApplicationController
         product_id: product.id
       )
 
+      if product.credits.to_i.positive?
+        CreditsService.grant!(
+          user: current_user,
+          amount: product.credits,
+          source: "checkout:#{product.id}",
+          metadata: { "product_name" => product.name }
+        )
+      end
+
       response_data = {
         free_access_granted: true,
         product_id: product.id,

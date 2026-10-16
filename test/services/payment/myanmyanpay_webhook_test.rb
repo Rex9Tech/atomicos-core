@@ -136,4 +136,35 @@ class Payment::MyanmyanpayWebhookTest < ActiveSupport::TestCase
     assert_equal "paid", result[:action]
     assert @purchase.reload.succeeded?
   end
+
+  test "SUCCESS grants credits for credit-pack products (once, replay-safe)" do
+    credit_product = Payment::Product.create!(
+      code: "MMPAYCRED1",
+      name: "Credits Test Pack",
+      unit_amount: 0,
+      currency: "mmk",
+      credits: 1_000
+    )
+    purchase = Payment::Purchase.create!(
+      user: @user,
+      product: credit_product,
+      provider: PaymentConstants::Provider::MYANMYANPAY,
+      provider_payment_id: "txn_ref_credits",
+      currency: "mmk",
+      unit_amount: 15_000,
+      status: PaymentConstants::PurchaseStatus::REQUIRES_PAYMENT_METHOD,
+      metadata: { "order_id" => "AZ-CREDITS1" }
+    )
+
+    payload = payload_for("SUCCESS", orderId: "AZ-CREDITS1", transactionRefId: "txn_ref_credits")
+
+    assert_equal "paid", @provider.process_webhook(payload)[:action]
+    assert_equal 1_000, @user.reload.credits
+
+    # Replays must never double-grant credits.
+    assert_equal "duplicate", @provider.process_webhook(payload)[:action]
+    assert_equal 1_000, @user.reload.credits
+    assert_equal 1,
+                 @user.credit_transactions.where(kind: "grant", source: "purchase:#{purchase.id}").count
+  end
 end

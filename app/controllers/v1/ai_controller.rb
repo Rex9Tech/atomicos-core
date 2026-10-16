@@ -15,6 +15,24 @@ class V1::AiController < V1::ApplicationController
       return
     end
 
+    # Consume credits for this AI message (fail fast, before queueing).
+    begin
+      CreditsService.spend!(
+        user: current_user,
+        amount: AppConfig::AI_CHAT_CREDIT_COST,
+        source: "chat",
+        metadata: { "room_id" => @room.id }
+      )
+    rescue CreditsService::InsufficientCredits
+      render_json_response(
+        status_code: 422,
+        message: ai_message(MessageService::Ai::INSUFFICIENT_CREDITS),
+        error: ai_message(MessageService::Ai::INSUFFICIENT_CREDITS),
+        data: { insufficient_credits: true, credits: current_user.reload.credits }
+      )
+      return
+    end
+
     result = Chat::MessageService.queue_ai_response!(
       user: current_user,
       room: @room,

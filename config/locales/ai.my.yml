@@ -8,6 +8,7 @@ my:
     title_parameter_missing: "ခေါင်းစဉ် မပါရှိပါ"
     service_error: "AI ဝန်ဆောင်မှု အမှားဖြစ်ပွားပါသည်"
     provider_error: "AI ဝန်ဆောင်မှု ယာယီမရနိုင်ပါ"
+    insufficient_credits: "ခရက်ဒစ်များ ကုန်ဆုံးသွားပါပြီ။ ဆက်လက်အသုံးပြုရန် Plans & Pricing တွင် ဖြည့်တင်းပါ။"
     response_generated: "AI အဖြေ ထုတ်ပေးပြီးပါပြီ"
     message_sent: "မက်ဆေ့ခ်ျ ပို့ပြီးပါပြီ"
     no_response: "အဖြေ မရှိပါ"
