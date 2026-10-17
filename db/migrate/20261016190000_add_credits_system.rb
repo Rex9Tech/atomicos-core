@@ -15,9 +15,17 @@ class AddCreditsSystem < ActiveRecord::Migration[8.1]
       t.string :kind, null: false             # grant | spend
       t.string :source                        # signup | backfill | purchase:<id> | chat | ...
       t.jsonb :metadata, default: {}
+      # Standard Auditable / Discard columns (ApplicationRecord applies both).
+      t.uuid :created_by_id
+      t.uuid :updated_by_id
+      t.datetime :discarded_at
+      t.uuid :discarded_by_id
+      t.datetime :undiscarded_at
+      t.uuid :undiscarded_by_id
       t.timestamps
       t.index [ :user_id, :created_at ]
       t.index [ :kind ]
+      t.index [ :discarded_at ]
     end
 
     # Backfill: initial free allowance for every existing user (idempotent).

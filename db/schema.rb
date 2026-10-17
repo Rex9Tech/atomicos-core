@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_14_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_16_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "uuid-ossp"
@@ -421,6 +421,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_14_130000) do
     t.index ["updated_by_id"], name: "index_coupons_on_updated_by_id"
   end
 
+  create_table "credit_transactions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "user_id", null: false
+    t.integer "amount", null: false
+    t.integer "balance_after", null: false
+    t.string "kind", null: false
+    t.string "source"
+    t.jsonb "metadata", default: {}
+    t.uuid "created_by_id"
+    t.uuid "updated_by_id"
+    t.datetime "discarded_at"
+    t.uuid "discarded_by_id"
+    t.datetime "undiscarded_at"
+    t.uuid "undiscarded_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["discarded_at"], name: "index_credit_transactions_on_discarded_at"
+    t.index ["kind"], name: "index_credit_transactions_on_kind"
+    t.index ["user_id", "created_at"], name: "index_credit_transactions_on_user_id_and_created_at"
+  end
+
   create_table "feedbacks", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.text "admin_notes"
     t.string "browser"
@@ -601,6 +621,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_14_130000) do
     t.string "google_play_product_id"
     t.string "app_store_product_id"
     t.boolean "available_on_myanmyanpay", default: false, null: false
+    t.integer "credits", default: 0, null: false
     t.index ["app_store_product_id"], name: "index_payment_products_on_app_store_product_id", unique: true
     t.index ["code"], name: "index_payment_products_on_code", unique: true
     t.index ["created_by_id"], name: "index_payment_products_on_created_by_id"
@@ -1443,6 +1464,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_14_130000) do
     t.datetime "updated_at", null: false
     t.uuid "updated_by_id"
     t.string "username", null: false
+    t.integer "credits", default: 0, null: false
     t.index ["confirmation_token"], name: "index_users_on_confirmation_token", unique: true
     t.index ["created_by_id"], name: "index_users_on_created_by_id"
     t.index ["discarded_at"], name: "index_users_on_discarded_at"
@@ -1527,6 +1549,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_14_130000) do
   add_foreign_key "coupons", "users", column: "referrer_id"
   add_foreign_key "coupons", "users", column: "undiscarded_by_id"
   add_foreign_key "coupons", "users", column: "updated_by_id"
+  add_foreign_key "credit_transactions", "users"
   add_foreign_key "feedbacks", "client_versions", column: "version_id", on_delete: :nullify
   add_foreign_key "feedbacks", "users"
   add_foreign_key "iam_permissions", "users", column: "created_by_id"
