@@ -9,12 +9,51 @@ module Payment
                  :get_session,
                  :cancel_subscription,
                  :resume_subscription,
-                 :create_coupon,
-                 :update_coupon,
-                 :discard_coupon,
-                 :undiscard_coupon,
-                 :destroy_coupon,
                  to: :stripe_provider
+
+        # Coupons: Stripe sync only makes sense when the Stripe rail is
+        # configured. The MMPay deployment keeps coupons fully local — the
+        # discount is computed by CouponService on our side and recorded as a
+        # redemption, no third-party entity to sync.
+        def create_coupon(attributes)
+          if stripe_usable?
+            stripe_provider.create_coupon(attributes)
+          else
+            create_local_coupon(attributes)
+          end
+        end
+
+        def update_coupon(coupon_id, attributes)
+          coupon = Payment::Coupon.with_discarded.find(coupon_id)
+          if stripe_usable? && coupon.provider_coupon_id.present?
+            stripe_provider.update_coupon(coupon_id, attributes)
+          else
+            coupon.assign_attributes(attributes)
+            coupon.save!
+            { data: coupon }
+          end
+        rescue ActiveRecord::RecordInvalid => e
+          { error: e.record.errors.full_messages.to_sentence }
+        end
+
+        def discard_coupon(coupon_id)
+          coupon = Payment::Coupon.find(coupon_id)
+          coupon.discard
+          { data: coupon }
+        end
+
+        def undiscard_coupon(coupon_id)
+          coupon = Payment::Coupon.with_discarded.find(coupon_id)
+          CouponService.ensure_stripe_coupon(coupon) if stripe_usable? && coupon.provider_coupon_id.blank?
+          coupon.undiscard
+          { data: coupon }
+        end
+
+        def destroy_coupon(coupon_id)
+          coupon = Payment::Coupon.with_discarded.find(coupon_id)
+          coupon.destroy!
+          { data: coupon }
+        end
 
         # Route checkout creation by provider. Stripe (the default) returns a
         # checkout_url to redirect to; MyanMyanPay returns an MMQR payload the
@@ -146,6 +185,18 @@ module Payment
           else
             { error: product.errors.full_messages.to_sentence }
           end
+        end
+
+        def create_local_coupon(attributes)
+          coupon = Payment::Coupon.new(attributes.merge(provider_coupon_id: nil))
+          coupon.save!
+          { data: coupon }
+        rescue ActiveRecord::RecordInvalid => e
+          { error: e.record.errors.full_messages.to_sentence }
+        end
+
+        def stripe_usable?
+          AppConfig::STRIPE_SECRET_KEY.to_s.strip.present?
         end
 
         def stripe_provider

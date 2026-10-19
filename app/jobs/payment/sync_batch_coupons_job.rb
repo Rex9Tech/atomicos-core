@@ -30,7 +30,13 @@ module Payment
         next if coupon.sync_succeeded? && coupon.provider_coupon_id.present?
         next if coupon.sync_failed?
 
-        sync_coupon(coupon)
+        if stripe_configured?
+          sync_coupon(coupon)
+        else
+          # No Stripe rail on this deployment — the coupon is local; activate
+          # it immediately so batch codes are redeemable as soon as created.
+          mark_synced_locally(coupon)
+        end
       end
     end
 
@@ -51,6 +57,23 @@ module Payment
     end
 
     private
+
+    def stripe_configured?
+      AppConfig::STRIPE_SECRET_KEY.to_s.strip.present?
+    end
+
+    def mark_synced_locally(coupon)
+      new_metadata = (coupon.metadata || {}).merge(
+        "status" => PaymentConstants::SyncStatus::SUCCEEDED,
+        "synced_at" => Time.current.iso8601,
+        "sync_mode" => "local"
+      ).except("sync_error", "failed_at")
+
+      coupon.update_columns(
+        active: true,
+        metadata: new_metadata
+      )
+    end
 
     def sync_coupon(coupon)
       stripe_id = CouponService.ensure_stripe_coupon(coupon, raise_on_error: true)
