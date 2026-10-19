@@ -317,7 +317,7 @@ class V1::AtomsController < V1::ApplicationController
     human = base.tr("_-", " ").squish
 
     if human.present?
-      human.truncate(50)
+      human.titleize.truncate(50)
     elsif asset.format.to_s == AssetConstants::AssetFormat::AUDIO
       atom_message(MessageService::Atom::DEFAULT_AUDIO_TITLE)
     else
