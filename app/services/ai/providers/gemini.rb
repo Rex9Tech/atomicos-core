@@ -13,7 +13,7 @@ module Ai
 
       def initialize
         @api_key = AppConfig::GEMINI_API_KEY
-        @base_url = AppConfig::GEMINI_BASE_URL
+        @base_url = AppConfig::GEMINI_OPENAI_BASE_URL
         @default_model = AppConfig::GEMINI_MODEL
       end
 

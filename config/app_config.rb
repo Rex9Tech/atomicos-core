@@ -193,7 +193,11 @@ module AppConfig
   DEEPSEEK_BASE_URL           = env_or.call("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
   DEEPSEEK_MODEL              = env_or.call("DEEPSEEK_MODEL", "deepseek-v4-flash")
   GEMINI_API_KEY              = env_or.call("GEMINI_API_KEY", "")
-  GEMINI_BASE_URL             = env_or.call("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+  # Native Gemini API root — services append their own /v1beta/... paths.
+  # Do NOT put /v1beta/openai here: that is the OpenAI-compatibility base and
+  # it double-prefixes every native URL (models 404).
+  GEMINI_BASE_URL             = env_or.call("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+  GEMINI_OPENAI_BASE_URL      = env_or.call("GEMINI_OPENAI_BASE_URL", "#{GEMINI_BASE_URL.chomp('/')}/v1beta/openai")
   GEMINI_MODEL                = env_or.call("GEMINI_MODEL", "gemini-2.5-flash")
 
   # ----------------------------------------------------------------------------
