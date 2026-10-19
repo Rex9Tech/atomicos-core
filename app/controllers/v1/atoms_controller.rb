@@ -165,7 +165,7 @@ class V1::AtomsController < V1::ApplicationController
     end
 
     atom = current_user.atoms.create!(
-      title: params[:title].presence || asset.name.to_s.truncate(50),
+      title: params[:title].presence || asset_title_for(asset),
       source: AtomConstants::Source::ASSET,
       status: AtomConstants::Status::DRAFT,
       duration_secs: asset.duration_secs,
@@ -302,6 +302,27 @@ class V1::AtomsController < V1::ApplicationController
       status_code: 404,
       message: atom_message(MessageService::Atom::ATOM_NOT_FOUND)
     )
+  end
+
+  # Asset-backed atoms: `asset.name` is the storage key
+  # ("user/<uuid>/general_new_recording_15_1792388185.m4a"), which made atom
+  # titles show raw S3 paths. Derive a readable title from the filename and
+  # fall back to a localized generic one.
+  def asset_title_for(asset)
+    raw = asset.title.presence || asset.name.to_s
+    base = File.basename(raw).sub(/\.[A-Za-z0-9]{1,5}\z/, "")
+    prefix = asset.type.to_s
+    base = base.sub(/\A#{Regexp.escape(prefix)}_/, "") if prefix.present?
+    base = base.sub(/_\d{6,}\z/, "")
+    human = base.tr("_-", " ").squish
+
+    if human.present?
+      human.truncate(50)
+    elsif asset.format.to_s == AssetConstants::AssetFormat::AUDIO
+      atom_message(MessageService::Atom::DEFAULT_AUDIO_TITLE)
+    else
+      prefix.titleize.presence || atom_message(MessageService::Atom::DEFAULT_AUDIO_TITLE)
+    end
   end
 
   def atom_payload(atom)

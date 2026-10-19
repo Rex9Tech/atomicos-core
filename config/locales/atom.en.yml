@@ -19,6 +19,7 @@ en:
     asset_attached: "Asset attached"
     asset_detached: "Asset removed"
     assets_fetched: "Assets"
+    default_audio_title: "Recording"
     default_url_title: "From URL"
     share_required: "Shared content is required"
     share_parameter_missing: "Missing shared content"

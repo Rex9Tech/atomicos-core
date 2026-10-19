@@ -20,6 +20,7 @@ module MessageService
     ASSET_DETACHED = "atom.asset_detached"
     ASSETS_FETCHED = "atom.assets_fetched"
     DEFAULT_URL_TITLE = "atom.default_url_title"
+    DEFAULT_AUDIO_TITLE = "atom.default_audio_title"
     SHARE_REQUIRED = "atom.share_required"
     SHARE_PARAMETER_MISSING = "atom.share_parameter_missing"
     DEFAULT_SHARE_TITLE = "atom.default_share_title"

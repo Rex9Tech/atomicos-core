@@ -19,6 +19,7 @@ my:
     asset_attached: "ဖိုင် ချိတ်ဆက်ပြီးပါပြီ"
     asset_detached: "ဖိုင် ဖယ်ရှားပြီးပါပြီ"
     assets_fetched: "ဖိုင်များ"
+    default_audio_title: "အသံဖမ်းတစ်ခု"
     default_url_title: "URL မှ"
     share_required: "မျှဝေထားသော အကြောင်းအရာ လိုအပ်ပါသည်"
     share_parameter_missing: "မျှဝေထားသော အကြောင်းအရာ မပါရှိပါ"
