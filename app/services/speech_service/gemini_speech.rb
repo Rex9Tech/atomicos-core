@@ -187,13 +187,24 @@ module SpeechService
       { "inlineData" => { "mimeType" => mime_type, "data" => Base64.strict_encode64(bytes) } }
     end
 
+    # A bare audio part makes the model answer with an EMPTY candidate
+    # (finishReason STOP, no content) — it needs to be told what to do.
+    STT_INSTRUCTION = "Transcribe this audio verbatim. Output only the transcript text. " \
+      "Do not add commentary, headings, speaker labels, or translations.".freeze
+
     def build_stt_payload(part, language)
-      payload = { "contents" => [ { "role" => "user", "parts" => [ part ] } ] }
-      # Pin the language when the caller knows it (BCP-47, e.g. "my-MM") —
-      # without a hint the transcribe model can mis-detect Burmese as
-      # unrelated languages on noisy or quiet audio.
       hint = language.to_s.strip
-      unless hint.empty?
+      instruction = STT_INSTRUCTION.dup
+      # Pin the language when the caller knows it (BCP-47, e.g. "my-MM") —
+      # without a hint the model can mis-detect Burmese on noisy audio.
+      instruction << " The audio language is #{hint}."
+
+      payload = {
+        "contents" => [ { "role" => "user", "parts" => [ { "text" => instruction }, part ] } ]
+      }
+      # Only the dedicated transcription model understands
+      # audioTranscriptionConfig; flash models reject unknown config fields.
+      if hint.present? && @stt_model.to_s.include?("transcribe")
         payload["generationConfig"] = {
           "audioTranscriptionConfig" => { "languageCodes" => [ hint ] }
         }

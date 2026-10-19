@@ -224,7 +224,10 @@ module AppConfig
   OPENROUTER_STT_MODEL        = env_or.call("OPENROUTER_STT_MODEL", "google/gemini-3.5-transcribe")
   SPEECH_STT_PROVIDER         = env_or.call("SPEECH_STT_PROVIDER", "azure")
 
-  GEMINI_STT_MODEL            = env_or.call("GEMINI_STT_MODEL", "gemini-3.5-transcribe")
+  # gemini-3.5-flash is the batch-STT workhorse: the dedicated
+  # gemini-3.5-transcribe model is quota-blocked on the project's key (429)
+  # and answers empty candidates when it does respond.
+  GEMINI_STT_MODEL            = env_or.call("GEMINI_STT_MODEL", "gemini-3.5-flash")
   GEMINI_LIVE_MODEL           = env_or.call("GEMINI_LIVE_MODEL", "gemini-3.5-transcribe-live")
   GEMINI_STT_FALLBACK_MODEL   = env_or.call("GEMINI_STT_FALLBACK_MODEL", "gemini-3.5-flash-lite")
   GEMINI_CHAT_FALLBACK_MODEL  = env_or.call("GEMINI_CHAT_FALLBACK_MODEL", "gemini-3.5-flash")

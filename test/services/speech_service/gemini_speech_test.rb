@@ -52,8 +52,14 @@ module SpeechService
 
       assert_equal({ text: "Hello world." }, result)
       path, payload = captured
-      assert_match(/gemini-3\.5-transcribe:generateContent/, path)
-      part = payload.dig("contents", 0, "parts", 0)
+      assert_match(/gemini-3\.5-flash:generateContent/, path)
+
+      # The model needs an instruction — a bare audio part yields an empty
+      # candidate (finishReason STOP, no content).
+      instruction = payload.dig("contents", 0, "parts", 0)
+      assert_match(/transcribe/i, instruction["text"].to_s)
+
+      part = payload.dig("contents", 0, "parts", 1)
       assert_equal "audio/wav", part.dig("inlineData", "mimeType")
       assert_equal Base64.strict_encode64("fake-bytes"), part.dig("inlineData", "data")
     end
@@ -81,7 +87,7 @@ module SpeechService
       end
 
       assert_equal({ text: "ok" }, result)
-      part = captured.dig("contents", 0, "parts", 0)
+      part = captured.dig("contents", 0, "parts", 1)
       assert_equal "audio/wav", part.dig("inlineData", "mimeType")
       assert_equal Base64.strict_encode64("wav-bytes"), part.dig("inlineData", "data")
     end
@@ -116,7 +122,7 @@ module SpeechService
 
       result = stub_method(provider, :post_json, lambda { |path, _payload|
         calls << path
-        path.include?("gemini-3.5-transcribe:") ? error_response : ok_response
+        path.include?("gemini-3.5-flash:") ? error_response : ok_response
       }) do
         provider.speech_to_text_from_file(audio: FakeUpload.new("fake-bytes", "meeting.wav"))
       end
@@ -178,7 +184,7 @@ module SpeechService
 
       assert_equal({ text: "Part one. Part two." }, result)
       assert_equal 2, calls.size
-      calls.each { |path| assert_match(%r{gemini-3\.5-transcribe:generateContent}, path) }
+      calls.each { |path| assert_match(%r{gemini-3\.5-flash:generateContent}, path) }
     end
 
     test "the batch call pins the client language when one is given" do
@@ -191,7 +197,10 @@ module SpeechService
       end
 
       assert_equal({ text: "မင်္ဂလာပါ" }, result)
-      assert_equal [ "my-MM" ], captured.dig("generationConfig", "audioTranscriptionConfig", "languageCodes")
+      # Flash models reject audioTranscriptionConfig — the hint rides on the
+      # instruction text instead.
+      instruction = captured.dig("contents", 0, "parts", 0, "text").to_s
+      assert_match(/my-MM/, instruction)
     end
 
     test "no language hint leaves the batch payload unpinned" do
