@@ -120,6 +120,16 @@ class V1::AssetsController < V1::ApplicationController
     end
 
     asset_type = upload[:type].presence || AssetConstants::AssetType::GENERAL
+    # Clients send listing-oriented hints ("audio", "video") that are not
+    # asset TYPES — recording uploads were silently 422'd (validation hit
+    # `type` inclusion) so their audio never attached to the atom. Deployed
+    # clients can't be hot-fixed; normalize instead of rejecting.
+    unless AssetConstants::AssetType::ALL.include?(asset_type)
+      Rails.logger.warn(
+        "[AssetsController] Normalizing unknown asset type '#{asset_type}' -> general"
+      )
+      asset_type = AssetConstants::AssetType::GENERAL
+    end
     assetable_type = upload[:assetable_type].presence
     assetable_id = upload[:assetable_id].presence
     duration_secs = upload[:duration_secs]
