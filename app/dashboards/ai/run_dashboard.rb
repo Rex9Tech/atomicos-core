@@ -20,6 +20,8 @@ class Ai::RunDashboard < Administrate::BaseDashboard
     total_tokens: Field::Number,
     prompt_tokens: Field::Number,
     completion_tokens: Field::Number,
+    # USD cost from OpenRouter catalog pricing (fallback-computed for old rows).
+    cost_display: Field::String.with_options(searchable: false),
     input_messages_count: Field::Number,
     input_chars: Field::Number,
     output_chars: Field::Number,
@@ -37,6 +39,7 @@ class Ai::RunDashboard < Administrate::BaseDashboard
     model
     status
     total_tokens
+    cost_display
     latency_ms
     created_at
   ].freeze
@@ -54,6 +57,7 @@ class Ai::RunDashboard < Administrate::BaseDashboard
     total_tokens
     prompt_tokens
     completion_tokens
+    cost_display
     input_messages_count
     input_chars
     output_chars

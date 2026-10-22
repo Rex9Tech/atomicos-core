@@ -68,6 +68,46 @@ module Ai
         raise
       end
 
+      # Text summarization (meeting transcripts, atom processing, …): records
+      # an ai_runs row (feature: "summarize") with tokens, latency and the
+      # OpenRouter-priced cost, so admins can audit summary usage alongside chat.
+      def execute_summarize(user:, text:, profile_key: nil, request_metadata: {})
+        profile = Ai::ProfileService.resolve!(profile_key)
+        messages = [
+          { role: AiConstants::ChatRole::SYSTEM, content: AiConstants::AiPrompt::SUMMARIZE_MARKDOWN },
+          { role: AiConstants::ChatRole::USER, content: text.to_s.truncate(12_000) }
+        ]
+        run = create_run!(user, profile, AiConstants::RunFeature::SUMMARIZE, messages, nil, request_metadata)
+        started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        result = Ai::Providers::Client.chat(
+          provider: profile.provider,
+          messages: messages,
+          model: profile.model,
+          temperature: 0.5,
+          max_tokens: 3_000,
+          timeout_seconds: profile.timeout_seconds
+        )
+
+        latency_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000).round
+        output = AiService::Client.text_from(result)
+
+        if result[:error].present?
+          fail_run!(run, result[:error], latency_ms, result)
+        elsif output.blank?
+          error_msg = ::MessageService::Ai.t(::MessageService::Ai::NO_RESPONSE)
+          fail_run!(run, error_msg, latency_ms, result)
+          result[:error] = error_msg
+        else
+          complete_run!(run, result, latency_ms)
+        end
+        result
+      rescue StandardError => error
+        latency_ms = started_at ? ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000).round : nil
+        fail_run!(run, error.message, latency_ms) if run
+        raise
+      end
+
       private
 
       def with_system_prompt(profile, messages, prompt_values)
@@ -105,7 +145,8 @@ module Ai
           completion_tokens: usage["completion_tokens"],
           total_tokens: usage["total_tokens"],
           latency_ms: latency_ms,
-          error: nil
+          error: nil,
+          cost_usd: cost_for(run, usage)
         )
       end
 
@@ -118,7 +159,17 @@ module Ai
           completion_tokens: usage["completion_tokens"],
           total_tokens: usage["total_tokens"],
           latency_ms: latency_ms,
-          error: error
+          error: error,
+          cost_usd: cost_for(run, usage)
+        )
+      end
+
+      # USD estimate via the OpenRouter catalog; nil-safe.
+      def cost_for(run, usage)
+        Ai::PricingService.cost_usd(
+          model: run.model,
+          prompt_tokens: usage["prompt_tokens"],
+          completion_tokens: usage["completion_tokens"]
         )
       end
     end

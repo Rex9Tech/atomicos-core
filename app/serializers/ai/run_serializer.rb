@@ -23,4 +23,13 @@ class Ai::RunSerializer < ApplicationSerializer
   attribute :profile_key do |run|
     run.profile&.key
   end
+
+  # USD cost (OpenRouter catalog pricing; display falls back for old rows).
+  attribute :cost_usd do |run|
+    run.cost_usd
+  end
+
+  attribute :cost_display do |run|
+    run.cost_display
+  end
 end

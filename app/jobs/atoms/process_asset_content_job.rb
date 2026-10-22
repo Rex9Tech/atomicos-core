@@ -32,7 +32,7 @@ class Atoms::ProcessAssetContentJob < ApplicationJob
     transcript = transcribe(asset, atom)
     raise "empty transcript" if transcript.blank?
 
-    summary = summarize(transcript)
+    summary = summarize(atom, transcript)
     raise "empty summary" if summary.blank?
 
     atom.update!(
@@ -58,19 +58,13 @@ class Atoms::ProcessAssetContentJob < ApplicationJob
     result[:text].to_s.strip
   end
 
-  def summarize(text)
-    messages = [
-      {
-        role: AiConstants::ChatRole::SYSTEM,
-        content: AiConstants::AiPrompt::SUMMARIZE_MARKDOWN
-      },
-      { role: AiConstants::ChatRole::USER, content: text.truncate(12_000) }
-    ]
-
-    result = AiService::Client.chat(
-      messages: messages,
-      temperature: 0.5,
-      max_tokens: 3_000
+  # Summaries run through Ai::RunService so each call is recorded in ai_runs
+  # (tokens + OpenRouter-priced cost) — previously they bypassed run logging.
+  def summarize(atom, text)
+    result = Ai::RunService.execute_summarize(
+      user: atom.user,
+      text: text,
+      request_metadata: { "atom_id" => atom.id, "flow" => "asset_upload" }
     )
     raise "summarize error: #{result[:error]}" if result[:error].present?
 

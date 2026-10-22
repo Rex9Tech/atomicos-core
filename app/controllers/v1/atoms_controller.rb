@@ -362,7 +362,7 @@ class V1::AtomsController < V1::ApplicationController
     source_text = [ content.title, content.description, content.text ].compact_blank.join("\n\n")
     return if source_text.blank?
 
-    summary = summarize_text(source_text)
+    summary = summarize_text(atom, source_text)
     return if summary.blank?
 
     note_content = [ content.title, content.description ].compact_blank.join("\n\n")
@@ -378,16 +378,13 @@ class V1::AtomsController < V1::ApplicationController
     Rails.logger.error("[ATOM-URL] Failed to process URL for atom #{atom.id}: #{e.message}")
   end
 
-  def summarize_text(text)
-    messages = [
-      { role: AiConstants::ChatRole::SYSTEM, content: AiConstants::AiPrompt::SUMMARIZE_MARKDOWN },
-      { role: AiConstants::ChatRole::USER, content: text.truncate(12_000) }
-    ]
-
-    result = AiService::Client.chat(
-      messages: messages,
-      temperature: 0.5,
-      max_tokens: 3_000
+  # Runs through Ai::RunService so each summary is recorded in ai_runs
+  # (tokens + OpenRouter-priced cost).
+  def summarize_text(atom, text)
+    result = Ai::RunService.execute_summarize(
+      user: atom.user,
+      text: text,
+      request_metadata: { "atom_id" => atom.id, "flow" => "url_import" }
     )
 
     return "" if result[:error].present?

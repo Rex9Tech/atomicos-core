@@ -138,19 +138,16 @@ class V1::RecordingsController < V1::ApplicationController
       return nil
     end
 
-    summarize_text(text)
+    summarize_text(atom, text)
   end
 
-  def summarize_text(text)
-    messages = [
-      { role: AiConstants::ChatRole::SYSTEM, content: AiConstants::AiPrompt::SUMMARIZE_MARKDOWN },
-      { role: AiConstants::ChatRole::USER, content: text.truncate(12_000) }
-    ]
-
-    result = AiService::Client.chat(
-      messages: messages,
-      temperature: 0.5,
-      max_tokens: 3_000
+  # Runs through Ai::RunService so each summary is recorded in ai_runs
+  # (tokens + OpenRouter-priced cost).
+  def summarize_text(atom, text)
+    result = Ai::RunService.execute_summarize(
+      user: atom.user,
+      text: text,
+      request_metadata: { "atom_id" => atom.id, "flow" => "recording_finish" }
     )
 
     return "" if result[:error].present?
