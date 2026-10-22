@@ -74,6 +74,9 @@ Rails.application.routes.draw do
       resources :webhook_events, only: %i[index show]
     end
 
+    # Credit ledger (grants/spends) — usage by source (chat, meeting_summary, …)
+    resources :credit_transactions, only: %i[index show]
+
     namespace :chat do
       resources :rooms, only: %i[index show new create edit update destroy]
       resources :messages, only: %i[index show new create edit update destroy]
