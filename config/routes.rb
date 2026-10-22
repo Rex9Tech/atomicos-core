@@ -253,6 +253,13 @@ Rails.application.routes.draw do
         end
 
         resources :user_coupons, only: %i[index show]
+
+        # Credit ledger + usage reporting (chat, meeting summaries, grants, purchases)
+        resources :credits, only: %i[index] do
+          collection do
+            get :summary
+          end
+        end
       end
 
       resources :notifications do

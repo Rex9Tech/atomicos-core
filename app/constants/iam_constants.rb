@@ -53,6 +53,7 @@ module IamConstants
     PAYMENT_PURCHASES     = "payment_purchases".freeze
     PAYMENT_COUPONS       = "payment_coupons".freeze
     PAYMENT_USER_COUPONS  = "payment_user_coupons".freeze
+    PAYMENT_CREDITS       = "payment_credits".freeze
     USER_NOTIFICATIONS    = "user_notifications".freeze
 
     ALL = [
@@ -61,7 +62,7 @@ module IamConstants
       CLIENT_LOGS, CLIENT_VERSIONS, CLIENT_USER_VERSIONS,
       IAM_ROLES, IAM_PERMISSIONS, IAM_USER_ROLES,
       PAYMENT_PRODUCTS, PAYMENT_PAYMENTS, PAYMENT_SUBSCRIPTIONS, PAYMENT_PURCHASES,
-      PAYMENT_COUPONS, PAYMENT_USER_COUPONS
+      PAYMENT_COUPONS, PAYMENT_USER_COUPONS, PAYMENT_CREDITS
     ].freeze
 
     # Compatibility aliases

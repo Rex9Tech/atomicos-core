@@ -65,5 +65,19 @@ class CreditsService
       end
       balance
     end
+
+    # Charges the configured meeting-summary cost for a recording/upload's AI
+    # summary (transcript + summary). Returns true when the charge went
+    # through, or when the cost is disabled (<= 0); false when the user
+    # cannot afford it — callers decide whether to fail or skip the summary.
+    def charge_meeting_summary(user:, metadata: {})
+      cost = AppConfig::AI_MEETING_SUMMARY_CREDIT_COST.to_i
+      return true if cost <= 0
+
+      spend!(user: user, amount: cost, source: "meeting_summary", metadata: metadata)
+      true
+    rescue InsufficientCredits
+      false
+    end
   end
 end

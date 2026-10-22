@@ -45,6 +45,9 @@ en:
       currency_mismatch: "Coupon currency does not match the product currency."
       too_many_attempts: "Too many invalid coupon attempts. Please try again later."
       too_many_attempts_with_wait: "Too many invalid coupon attempts. Please wait %{seconds} seconds before trying again."
+    credits:
+      fetched: "Credit transactions fetched successfully."
+      summary_fetched: "Credit usage summary fetched successfully."
     user_coupons:
       fetched: "Coupon redemptions fetched successfully."
       fetched_one: "Coupon redemption fetched successfully."

@@ -18,6 +18,10 @@ module MessageService
     SUBSCRIPTIONS_FETCHED = "payment.subscriptions.fetched"
     SUBSCRIPTION_FETCHED = "payment.subscriptions.fetched_one"
 
+    # Credits
+    CREDIT_TRANSACTIONS_FETCHED = "payment.credits.fetched"
+    CREDIT_SUMMARY_FETCHED = "payment.credits.summary_fetched"
+
     # Coupons
     COUPONS_FETCHED = "payment.coupons.fetched"
     COUPON_FETCHED = "payment.coupons.fetched_one"

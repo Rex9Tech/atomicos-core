@@ -24,3 +24,4 @@ my:
     share_required: "မျှဝေထားသော အကြောင်းအရာ လိုအပ်ပါသည်"
     share_parameter_missing: "မျှဝေထားသော အကြောင်းအရာ မပါရှိပါ"
     default_share_title: "မျှဝေထားသော"
+    insufficient_credits: "ခရက်ဒစ်များ ကုန်ဆုံးသွားပါပြီ။ ဆက်လက်အသုံးပြုရန် Plans & Pricing တွင် ဖြည့်တင်းပါ။"

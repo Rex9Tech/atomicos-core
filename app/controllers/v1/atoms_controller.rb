@@ -178,6 +178,20 @@ class V1::AtomsController < V1::ApplicationController
     # the provider can 503/429 transiently, and doing it inline made uploads
     # hang ~12s and skip silently when the call failed.
     if asset.format == AssetConstants::AssetFormat::AUDIO
+      # AI processing (transcript + summary) consumes credits, like chat.
+      unless CreditsService.charge_meeting_summary(
+        user: current_user,
+        metadata: { "atom_id" => atom.id, "flow" => "asset_upload" }
+      )
+        render_json_response(
+          status_code: 422,
+          message: atom_message(MessageService::Atom::INSUFFICIENT_CREDITS),
+          error: atom_message(MessageService::Atom::INSUFFICIENT_CREDITS),
+          data: { insufficient_credits: true, credits: current_user.reload.credits }
+        )
+        return
+      end
+
       atom.update!(status: AtomConstants::Status::PROCESSING)
       Atoms::ProcessAssetContentJob.perform_later(atom.id)
     end

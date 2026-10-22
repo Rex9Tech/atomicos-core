@@ -24,3 +24,4 @@ en:
     share_required: "Shared content is required"
     share_parameter_missing: "Missing shared content"
     default_share_title: "Shared"
+    insufficient_credits: "You're out of credits. Top up in Plans & Pricing to continue."

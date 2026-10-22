@@ -157,6 +157,7 @@ module AppConfig
   # ===== Credits =====
   FREE_USER_CREDITS           = env_or.call("FREE_USER_CREDITS", "100").to_i
   AI_CHAT_CREDIT_COST         = env_or.call("AI_CHAT_CREDIT_COST", "1").to_i
+  AI_MEETING_SUMMARY_CREDIT_COST = env_or.call("AI_MEETING_SUMMARY_CREDIT_COST", "1").to_i
   MMPAY_APP_ID                = env_or.call("MMPAY_APP_ID", "")
   MMPAY_PUBLISHABLE_KEY       = env_or.call("MMPAY_PUBLISHABLE_KEY", "")
   MMPAY_SECRET_KEY            = env_or.call("MMPAY_SECRET_KEY", "")

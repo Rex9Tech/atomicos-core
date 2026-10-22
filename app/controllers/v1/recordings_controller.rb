@@ -115,7 +115,7 @@ class V1::RecordingsController < V1::ApplicationController
     updates[:transcript_segments] = [ { "speaker" => "Speaker", "text" => transcript } ] if transcript.present?
 
     if transcript.present?
-      summary = summarize_text(transcript)
+      summary = charged_summary(atom, transcript)
       updates[:summary_blocks] = [ { "type" => "summary", "text" => summary } ] if summary.present?
       updates[:status] = AtomConstants::Status::COMPLETED
       updates[:recording_status] = AtomConstants::RecordingStatus::COMPLETED
@@ -124,6 +124,21 @@ class V1::RecordingsController < V1::ApplicationController
     atom.update!(updates) if updates.present?
   rescue StandardError => e
     Rails.logger.error("[ATOM-RECORDING] Failed to process recording atom #{atom.id}: #{e.message}")
+  end
+
+  # AI summaries consume credits (AppConfig::AI_MEETING_SUMMARY_CREDIT_COST).
+  # When the user is out of credits we still finish the recording (transcript
+  # + note are saved) but skip the summary rather than failing the request.
+  def charged_summary(atom, text)
+    unless CreditsService.charge_meeting_summary(
+      user: atom.user,
+      metadata: { "atom_id" => atom.id, "flow" => "recording_finish" }
+    )
+      Rails.logger.info("[CREDITS] skipping summary for atom #{atom.id}: insufficient credits")
+      return nil
+    end
+
+    summarize_text(text)
   end
 
   def summarize_text(text)

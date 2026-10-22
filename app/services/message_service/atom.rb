@@ -18,6 +18,7 @@ module MessageService
     ASSET_NOT_FOUND = "atom.asset_not_found"
     ASSET_ATTACHED = "atom.asset_attached"
     ASSET_DETACHED = "atom.asset_detached"
+    INSUFFICIENT_CREDITS = "atom.insufficient_credits"
     ASSETS_FETCHED = "atom.assets_fetched"
     DEFAULT_URL_TITLE = "atom.default_url_title"
     DEFAULT_AUDIO_TITLE = "atom.default_audio_title"
