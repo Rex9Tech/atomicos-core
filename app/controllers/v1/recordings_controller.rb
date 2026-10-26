@@ -117,9 +117,13 @@ class V1::RecordingsController < V1::ApplicationController
     if transcript.present?
       summary = charged_summary(atom, transcript)
       updates[:summary_blocks] = [ { "type" => "summary", "text" => summary } ] if summary.present?
-      updates[:status] = AtomConstants::Status::COMPLETED
-      updates[:recording_status] = AtomConstants::RecordingStatus::COMPLETED
     end
+
+    # A finished recording must NEVER hang in "processing": with live captions
+    # off there is no transcript to summarize (and a failed summary can also
+    # leave none), but the recording itself is done either way.
+    updates[:status] = AtomConstants::Status::COMPLETED
+    updates[:recording_status] = AtomConstants::RecordingStatus::COMPLETED
 
     atom.update!(updates) if updates.present?
   rescue StandardError => e
