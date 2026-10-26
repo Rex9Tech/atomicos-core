@@ -35,11 +35,17 @@ class Atoms::ProcessAssetContentJob < ApplicationJob
     summary = summarize(atom, transcript)
     raise "empty summary" if summary.blank?
 
-    atom.update!(
+    completion = {
       status: AtomConstants::Status::COMPLETED,
       transcript_segments: [ { "speaker" => "Speaker", "text" => transcript } ],
       summary_blocks: [ { "type" => "summary", "text" => summary } ]
-    )
+    }
+    # Meeting atoms carry a recording lifecycle too — complete it so the
+    # recording never reads as "processing" after the server transcription.
+    if atom.source == AtomConstants::Source::MEETING
+      completion[:recording_status] = AtomConstants::RecordingStatus::COMPLETED
+    end
+    atom.update!(completion)
 
     broadcast(atom)
   rescue ActiveRecord::RecordNotFound
