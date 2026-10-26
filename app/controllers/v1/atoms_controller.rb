@@ -279,6 +279,10 @@ class V1::AtomsController < V1::ApplicationController
       @atom.update!(duration_secs: asset.duration_secs)
     end
 
+    # Caption-off meetings arrive as audio only: transcribe + summarize from
+    # the uploaded audio (same as the upload flow) so they still get a summary.
+    maybe_queue_recording_audio_processing(asset)
+
     broadcast_atom_event(
       NotificationConstants::NotificationType::ASSET_PROCESSED,
       @atom
@@ -337,6 +341,33 @@ class V1::AtomsController < V1::ApplicationController
     else
       prefix.titleize.presence || atom_message(MessageService::Atom::DEFAULT_AUDIO_TITLE)
     end
+  end
+
+  # Caption-off meetings reach the server as audio without a transcript. When
+  # the recording's audio lands and the atom still has no transcript/summary,
+  # transcribe + summarize it exactly like an uploaded audio atom (charges one
+  # meeting-summary credit; skipped when the user cannot afford it).
+  def maybe_queue_recording_audio_processing(asset)
+    return unless @atom.source == AtomConstants::Source::MEETING
+    return unless asset.format == AssetConstants::AssetFormat::AUDIO
+    return unless asset.type != AssetConstants::AssetType::ATTACHMENT
+    return if @atom.transcript_segments.to_a.any? || @atom.summary_blocks.to_a.any?
+    return if @atom.metadata["server_stt_queued"]
+
+    unless CreditsService.charge_meeting_summary(
+      user: @atom.user,
+      metadata: { "atom_id" => @atom.id, "flow" => "recording_audio" }
+    )
+      Rails.logger.info("[CREDITS] skipping server STT for atom #{@atom.id}: insufficient credits")
+      return
+    end
+
+    @atom.update!(
+      status: AtomConstants::Status::PROCESSING,
+      recording_status: AtomConstants::RecordingStatus::PROCESSING,
+      metadata: @atom.metadata.merge("server_stt_queued" => true)
+    )
+    Atoms::ProcessAssetContentJob.perform_later(@atom.id)
   end
 
   def atom_payload(atom)
