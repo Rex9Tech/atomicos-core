@@ -108,6 +108,43 @@ module Ai
         raise
       end
 
+      # ---- Live transcription (SpeechLiveChannel) --------------------------
+      # One ai_runs row per live STT session (feature "transcribe") so admins
+      # can audit duration and cost alongside chat/summarize runs. These are
+      # speech sessions, not LLM calls, so they carry no AI profile.
+
+      def start_transcribe(user:, provider:, model:, request_metadata: {})
+        Ai::Run.create!(
+          user: user,
+          profile: nil,
+          feature: AiConstants::RunFeature::TRANSCRIBE,
+          provider: provider,
+          model: model,
+          status: AiConstants::RunStatus::PROCESSING,
+          request_metadata: request_metadata
+        )
+      end
+
+      # Finalizes a live-transcription run; auditing never breaks the speech
+      # path — worst case the row keeps its "processing" status.
+      def finish_transcribe(run, audio_seconds: nil, transcript_chars: nil, latency_ms: nil, error: nil)
+        metadata = run.request_metadata.to_h
+        metadata["audio_seconds"] = audio_seconds.round(2) if audio_seconds.present?
+
+        run.update!(
+          status: error.present? ? AiConstants::RunStatus::FAILED : AiConstants::RunStatus::COMPLETED,
+          output_chars: transcript_chars.to_i,
+          latency_ms: latency_ms,
+          error: error,
+          cost_usd: transcribe_cost(run, audio_seconds),
+          request_metadata: metadata
+        )
+        run
+      rescue StandardError => e
+        Rails.logger.warn("[AI-RUNS] transcribe finalize failed: #{e.message}")
+        nil
+      end
+
       private
 
       def with_system_prompt(profile, messages, prompt_values)
@@ -171,6 +208,14 @@ module Ai
           prompt_tokens: usage["prompt_tokens"],
           completion_tokens: usage["completion_tokens"]
         )
+      end
+
+      # Live transcription cost: duration-priced. The configured rate card
+      # covers the Gemini Live API, so other providers show "—" for now.
+      def transcribe_cost(run, audio_seconds)
+        return nil unless run.provider == AiConstants::Provider::GEMINI
+
+        Ai::PricingService.transcribe_cost_usd(audio_seconds: audio_seconds)
       end
     end
   end

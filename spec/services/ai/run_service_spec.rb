@@ -61,4 +61,50 @@ RSpec.describe Ai::RunService do
       expect(described_class.list(status: AiConstants::RunStatus::FAILED)).to include(run2)
     end
   end
+
+  describe ".start_transcribe / .finish_transcribe" do
+    it "records a profile-less transcribe run and prices it by audio duration" do
+      stub_const("AppConfig::GEMINI_LIVE_AUDIO_USD_PER_MINUTE", 0.0015)
+
+      run = described_class.start_transcribe(
+        user: user,
+        provider: AiConstants::Provider::GEMINI,
+        model: AppConfig::GEMINI_LIVE_MODEL,
+        request_metadata: { "endpoint" => "speech_live", "language" => "my-MM" }
+      )
+
+      expect(run.feature).to eq(AiConstants::RunFeature::TRANSCRIBE)
+      expect(run.profile).to be_nil
+      expect(run.status).to eq(AiConstants::RunStatus::PROCESSING)
+
+      described_class.finish_transcribe(run, audio_seconds: 90.0, transcript_chars: 120, latency_ms: 95_000)
+
+      run.reload
+      expect(run.status).to eq(AiConstants::RunStatus::COMPLETED)
+      expect(run.output_chars).to eq(120)
+      expect(run.latency_ms).to eq(95_000)
+      expect(run.request_metadata["audio_seconds"]).to eq(90.0)
+      expect(run.cost_usd).to be_within(0.000001).of(0.00225)
+    end
+
+    it "leaves cost empty for non-Gemini live providers (no rate configured)" do
+      run = described_class.start_transcribe(user: user, provider: AiConstants::Provider::AZURE, model: "azure-speech")
+
+      described_class.finish_transcribe(run, audio_seconds: 60.0)
+
+      run.reload
+      expect(run.status).to eq(AiConstants::RunStatus::COMPLETED)
+      expect(run.cost_usd).to be_nil
+    end
+
+    it "records errors onto the run" do
+      run = described_class.start_transcribe(user: user, provider: AiConstants::Provider::GEMINI, model: AppConfig::GEMINI_LIVE_MODEL)
+
+      described_class.finish_transcribe(run, audio_seconds: 12.5, error: "provider exploded")
+
+      run.reload
+      expect(run.status).to eq(AiConstants::RunStatus::FAILED)
+      expect(run.error).to eq("provider exploded")
+    end
+  end
 end

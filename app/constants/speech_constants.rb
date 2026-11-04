@@ -20,6 +20,8 @@ module SpeechConstants
     AUDIO_SAMPLE_RATE = 16_000
     AUDIO_BITS_PER_SAMPLE = 16
     AUDIO_CHANNELS = 1
+    # PCM16 mono @16k → 32,000 bytes per audio second (cost telemetry).
+    AUDIO_BYTES_PER_SECOND = AUDIO_SAMPLE_RATE * (AUDIO_BITS_PER_SAMPLE / 8) * AUDIO_CHANNELS
     # Azure caps one audio message at 8192 bytes including its header block.
     MAX_AUDIO_CHUNK_BYTES = 4096
     # Live audio has no known length, so the RIFF size fields stay maxed out.

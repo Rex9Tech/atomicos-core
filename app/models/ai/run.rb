@@ -4,11 +4,13 @@ module Ai
   class Run < ApplicationRecord
     self.table_name = "ai_runs"
 
-    belongs_to :profile, class_name: "Ai::Profile", foreign_key: :ai_profile_id
+    belongs_to :profile, class_name: "Ai::Profile", foreign_key: :ai_profile_id, optional: true
     belongs_to :user
     belongs_to :chat_message, class_name: "Chat::Message", optional: true
 
     validates :feature, presence: true, inclusion: { in: AiConstants::RunFeature::ALL }
+    # Transcribe runs are live speech sessions, not LLM calls — no profile.
+    validates :profile, presence: true, unless: -> { feature == AiConstants::RunFeature::TRANSCRIBE }
     validates :provider, presence: true, inclusion: { in: AiConstants::Provider::ALL }
     validates :model, presence: true
     validates :status, presence: true, inclusion: { in: AiConstants::RunStatus::ALL }

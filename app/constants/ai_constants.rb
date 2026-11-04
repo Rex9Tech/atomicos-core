@@ -16,8 +16,10 @@ module AiConstants
     DEEPSEEK   = "deepseek".freeze
     GEMINI     = "gemini".freeze
     OPENROUTER = "openrouter".freeze
+    # Speech-only provider (live/batch STT sessions); never used by profiles.
+    AZURE      = "azure".freeze
 
-    ALL = [ DEEPSEEK, GEMINI, OPENROUTER ].freeze
+    ALL = [ DEEPSEEK, GEMINI, OPENROUTER, AZURE ].freeze
   end
 
   module ProfileKey
@@ -55,12 +57,13 @@ module AiConstants
   end
 
   module RunFeature
-    CHAT      = "chat".freeze
-    SUMMARIZE = "summarize".freeze
-    TRANSLATE = "translate".freeze
-    ANALYZE   = "analyze".freeze
+    CHAT       = "chat".freeze
+    SUMMARIZE  = "summarize".freeze
+    TRANSLATE  = "translate".freeze
+    ANALYZE    = "analyze".freeze
+    TRANSCRIBE = "transcribe".freeze
 
-    ALL = [ CHAT, SUMMARIZE, TRANSLATE, ANALYZE ].freeze
+    ALL = [ CHAT, SUMMARIZE, TRANSLATE, ANALYZE, TRANSCRIBE ].freeze
   end
 
   module RequestMetadata

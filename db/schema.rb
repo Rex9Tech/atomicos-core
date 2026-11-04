@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_16_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_04_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "uuid-ossp"
@@ -71,7 +71,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_190000) do
   end
 
   create_table "ai_runs", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.uuid "ai_profile_id", null: false
+    t.uuid "ai_profile_id"
     t.uuid "user_id", null: false
     t.uuid "chat_message_id"
     t.string "feature", null: false
@@ -95,6 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_190000) do
     t.uuid "undiscarded_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.decimal "cost_usd", precision: 12, scale: 6
     t.index ["ai_profile_id"], name: "index_ai_runs_on_ai_profile_id"
     t.index ["chat_message_id"], name: "index_ai_runs_on_chat_message_id"
     t.index ["created_at"], name: "index_ai_runs_on_created_at"

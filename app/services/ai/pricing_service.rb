@@ -50,6 +50,20 @@ module Ai
         nil
       end
 
+      # Live transcription (Gemini Live API) is billed by audio duration
+      # rather than token counts; rate per minute is configurable via
+      # GEMINI_LIVE_AUDIO_USD_PER_MINUTE. nil when no audio was processed.
+      def transcribe_cost_usd(audio_seconds:)
+        return nil if audio_seconds.nil?
+
+        seconds = audio_seconds.to_f
+        return nil if seconds <= 0
+
+        (seconds / 60.0 * AppConfig::GEMINI_LIVE_AUDIO_USD_PER_MINUTE.to_f).round(6)
+      rescue StandardError
+        nil
+      end
+
       def fetch_price_table
         require "net/http"
 

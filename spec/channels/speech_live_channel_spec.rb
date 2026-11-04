@@ -89,5 +89,35 @@ RSpec.describe SpeechLiveChannel, type: :channel do
         data: { type: "error", error: "Live transcription is not configured" }
       )
     end
+
+    it "records a transcribe ai_runs row for the live session" do
+      subscribe(language: "en-US")
+
+      run = Ai::Run.where(feature: AiConstants::RunFeature::TRANSCRIBE).last
+      expect(run).to be_present
+      expect(run.user).to eq(user)
+      expect(run.status).to eq(AiConstants::RunStatus::PROCESSING)
+
+      unsubscribe
+
+      expect(run.reload.status).to eq(AiConstants::RunStatus::COMPLETED)
+    end
+
+    it "accumulates audio seconds and transcript chars into the run" do
+      on_event = nil
+      allow(SpeechService::Client).to receive(:start_live_stt) do |**kwargs|
+        on_event = kwargs[:on_event]
+        session
+      end
+
+      subscribe
+      perform :audio, chunk: Base64.strict_encode64("x" * 32_000)
+      on_event.call(type: "final", text: "hello world")
+      unsubscribe
+
+      run = Ai::Run.where(feature: AiConstants::RunFeature::TRANSCRIBE).last.reload
+      expect(run.request_metadata["audio_seconds"]).to eq(1.0)
+      expect(run.output_chars).to eq("hello world".length)
+    end
   end
 end

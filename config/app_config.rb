@@ -230,6 +230,10 @@ module AppConfig
   # and answers empty candidates when it does respond.
   GEMINI_STT_MODEL            = env_or.call("GEMINI_STT_MODEL", "gemini-3.5-flash")
   GEMINI_LIVE_MODEL           = env_or.call("GEMINI_LIVE_MODEL", "gemini-3.5-transcribe-live")
+  # Live transcription is billed by audio duration (≈$1 per 1M audio tokens
+  # at ~25 tokens/sec); used by Ai::PricingService for ai_runs "transcribe"
+  # cost estimates — tune to the provider's current rate card.
+  GEMINI_LIVE_AUDIO_USD_PER_MINUTE = env_or.call("GEMINI_LIVE_AUDIO_USD_PER_MINUTE", "0.0015")
   GEMINI_STT_FALLBACK_MODEL   = env_or.call("GEMINI_STT_FALLBACK_MODEL", "gemini-3.5-flash-lite")
   GEMINI_CHAT_FALLBACK_MODEL  = env_or.call("GEMINI_CHAT_FALLBACK_MODEL", "gemini-3.5-flash")
   GEMINI_THINKING_BUDGET      = env_or.call("GEMINI_THINKING_BUDGET", "0").to_i

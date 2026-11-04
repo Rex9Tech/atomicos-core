@@ -30,12 +30,32 @@ module SpeechService
         { message: message, job_id: job.job_id }
       end
 
+      # Provider/model pair for the live STT transport actually in use — live
+      # routing differs from batch: OpenRouter has no live transport and
+      # falls back to the Gemini Live session (see OpenRouterSpeech).
+      def live_transcribe_route
+        case active_stt_provider_key
+        when "gemini", "openrouter"
+          { provider: AiConstants::Provider::GEMINI, model: AppConfig::GEMINI_LIVE_MODEL }
+        else
+          { provider: AiConstants::Provider::AZURE, model: "azure-speech" }
+        end
+      end
+
+      def active_stt_provider_key
+        case AppConfig::SPEECH_STT_PROVIDER.to_s.downcase
+        when "gemini" then "gemini"
+        when "openrouter" then "openrouter"
+        else "azure"
+        end
+      end
+
       private
 
       # Live + batch transcription follow SPEECH_STT_PROVIDER ("azure" |
       # "gemini" | "openrouter"); TTS is pinned to Azure.
       def stt_provider
-        case AppConfig::SPEECH_STT_PROVIDER.to_s.downcase
+        case active_stt_provider_key
         when "gemini" then gemini_provider
         when "openrouter" then open_router_provider
         else azure_provider
