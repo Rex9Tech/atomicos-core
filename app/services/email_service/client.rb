@@ -13,6 +13,8 @@ module EmailService
         case AppConfig::EMAIL_PROVIDER.to_sym
         when :brevo
           Brevo.new
+        when :smtp
+          Smtp.new
         when :one_signal
           OneSignal.new
         else

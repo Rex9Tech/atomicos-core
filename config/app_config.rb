@@ -255,8 +255,6 @@ module AppConfig
   # ----------------------------------------------------------------------------
   ENFORCE_BOOT_GUARD          = env_or.call("ENFORCE_BOOT_GUARD") == "true"
   TEST_BOOT_GUARD             = env_or.call("TEST_BOOT_GUARD") == "true"
-  # Fixed OTP for tester logins (AtomicOS re-apply).
-  TEST_OTP_CODE               = env_or.call("TEST_OTP_CODE", "")
   QUIET_BOOT                  = env_or.call("QUIET_BOOT") == "true"
 
   # ----------------------------------------------------------------------------

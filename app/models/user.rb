@@ -66,11 +66,7 @@ class User < ApplicationRecord
   end
 
   def confirm_code(code)
-    if AppConfig::TEST_OTP_CODE.present? && code.to_s.strip == AppConfig::TEST_OTP_CODE
-      # Tester builds cannot receive email; a fixed code is accepted.
-      # Deliberately skips the per-user code and its expiry.
-      confirm
-    elsif confirmation_code == code &&
+    if confirmation_code == code &&
       confirmation_sent_at.present? &&
       confirmation_sent_at > AppConfig::CONFIRM_CODE_WITHIN.ago
       self.confirmation_code = nil
