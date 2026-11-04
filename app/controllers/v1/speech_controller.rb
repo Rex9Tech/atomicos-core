@@ -15,11 +15,15 @@ class V1::SpeechController < V1::ApplicationController
     stt = stt_params
     audio = stt[:audio]
     audio_url = stt[:audio_url]
+    # Optional per-record language (BCP-47); providers fall back to their
+    # configured default when absent (and the argument is omitted entirely).
+    language = stt[:language].presence
+    language_opts = language ? { language: language } : {}
 
     if audio.present?
-      result = SpeechService::Client.speech_to_text_from_file(audio: audio, language: language)
+      result = SpeechService::Client.speech_to_text_from_file(audio: audio, **language_opts)
     elsif audio_url.present?
-      result = SpeechService::Client.speech_to_text_from_url(audio_url: audio_url, language: language)
+      result = SpeechService::Client.speech_to_text_from_url(audio_url: audio_url, **language_opts)
     else
       render_json_response(
         status_code: 422,
@@ -121,7 +125,7 @@ class V1::SpeechController < V1::ApplicationController
   end
 
   def stt_params
-    params.permit(:audio, :audio_url)
+    params.permit(:audio, :audio_url, :language)
   end
 
   def speech_message(key, **options)
