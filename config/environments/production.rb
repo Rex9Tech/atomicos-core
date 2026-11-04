@@ -127,8 +127,8 @@ Rails.application.configure do
     address:              AppConfig::SMTP_ADDRESS,
     port:                 AppConfig::SMTP_PORT,
     domain:               AppConfig::SMTP_DOMAIN,
-    user_name:            AppConfig::SMTP_USERNAME,
-    password:             AppConfig::SMTP_PASSWORD,
+    user_name:            AppConfig::SMTP_USERNAME.presence,
+    password:             AppConfig::SMTP_PASSWORD.presence,
     authentication:       "plain",
     enable_starttls_auto: true
   }
