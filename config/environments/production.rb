@@ -129,7 +129,7 @@ Rails.application.configure do
     domain:               AppConfig::SMTP_DOMAIN,
     user_name:            AppConfig::SMTP_USERNAME.presence,
     password:             AppConfig::SMTP_PASSWORD.presence,
-    authentication:       "plain",
+    authentication:       AppConfig::SMTP_USERNAME.present? ? "plain" : nil,
     enable_starttls_auto: true
   }
 
