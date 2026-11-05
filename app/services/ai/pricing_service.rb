@@ -25,13 +25,20 @@ module Ai
         {}
       end
 
-      # Unit prices for a model id; accepts the full "vendor/model" form and
-      # falls back to a bare-model match (e.g. "gemini-3.8-flash").
+      # Unit prices for a model id. Resolution order: exact catalog id
+      # ("google/gemini-3.8-flash"), exact bare id, the google/-prefixed id
+      # (direct-provider runs store bare names, e.g. "gemini-3.5-flash"),
+      # then any non-canonical vendor entry with the same model suffix.
       def unit_prices(model)
         return nil if model.blank?
 
         table = price_table
-        table[model.to_s] || table[model.to_s.split("/").last.to_s]
+        full = model.to_s
+        bare = full.split("/").last.to_s
+
+        table[full] || table[bare] || table["google/#{bare}"] ||
+          table.find { |key, _| key.end_with?("/#{bare}") && !key.start_with?("~") }&.last ||
+          table.find { |key, _| key.end_with?("/#{bare}") }&.last
       rescue StandardError
         nil
       end
