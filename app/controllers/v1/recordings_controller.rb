@@ -62,6 +62,23 @@ class V1::RecordingsController < V1::ApplicationController
 
   # POST /v1/recordings/:id/finish — end recording and turn it into an Atom
   def create_finish
+    # A client-side timeout can land here twice (the request kept running on
+    # the server, the app retried). Once finished, return the same payload
+    # instead of creating a second atom or charging the summary again.
+    if @recording.status == RecordingConstants::Status::COMPLETED &&
+        @recording.atom.present?
+      atom = @recording.atom
+      render_json_response(
+        status_code: 200,
+        message: recording_message(MessageService::Recording::RECORDING_FINISHED),
+        data: {
+          recording: recording_payload(@recording),
+          atom: AtomSerializer.new(atom).serializable_hash[:data][:attributes]
+        }
+      )
+      return
+    end
+
     transcript = params[:transcript].to_s.strip
     note = params[:note].to_s.strip
     atom = nil
@@ -105,8 +122,10 @@ class V1::RecordingsController < V1::ApplicationController
   private
 
   # Folds the device's live transcript (and any note typed during the session)
-  # into the finished recording's atom. Summarized synchronously so the atom is
-  # usable without depending on the background worker.
+  # into the finished recording's atom. The AI summary runs in a background
+  # job (Recordings::SummarizeAtomJob): a long transcript takes longer to
+  # summarize than the mobile client's HTTP timeout, and ending a meeting must
+  # never wait on an LLM.
   def apply_recording_content(atom, transcript:, note:)
     return if atom.nil?
 
@@ -114,51 +133,19 @@ class V1::RecordingsController < V1::ApplicationController
     updates[:note] = note if note.present?
     updates[:transcript_segments] = [ { "speaker" => "Speaker", "text" => transcript } ] if transcript.present?
 
-    if transcript.present?
-      summary = charged_summary(atom, transcript)
-      updates[:summary_blocks] = [ { "type" => "summary", "text" => summary } ] if summary.present?
-    end
-
     # A finished recording must NEVER hang in "processing": with live captions
-    # off there is no transcript to summarize (and a failed summary can also
-    # leave none), but the recording itself is done either way.
+    # off there is no transcript to summarize, but the recording itself is done
+    # either way. The summary lands later and broadcasts an atom update.
     updates[:status] = AtomConstants::Status::COMPLETED
     updates[:recording_status] = AtomConstants::RecordingStatus::COMPLETED
 
     atom.update!(updates) if updates.present?
+
+    if transcript.present?
+      Recordings::SummarizeAtomJob.perform_later(atom.id, transcript)
+    end
   rescue StandardError => e
     Rails.logger.error("[ATOM-RECORDING] Failed to process recording atom #{atom.id}: #{e.message}")
-  end
-
-  # AI summaries consume credits (AppConfig::AI_MEETING_SUMMARY_CREDIT_COST).
-  # When the user is out of credits we still finish the recording (transcript
-  # + note are saved) but skip the summary rather than failing the request.
-  def charged_summary(atom, text)
-    unless CreditsService.charge_meeting_summary(
-      user: atom.user,
-      metadata: { "atom_id" => atom.id, "flow" => "recording_finish" }
-    )
-      Rails.logger.info("[CREDITS] skipping summary for atom #{atom.id}: insufficient credits")
-      return nil
-    end
-
-    summarize_text(atom, text)
-  end
-
-  # Runs through Ai::RunService so each summary is recorded in ai_runs
-  # (tokens + OpenRouter-priced cost).
-  def summarize_text(atom, text)
-    result = Ai::RunService.execute_summarize(
-      user: atom.user,
-      text: text,
-      request_metadata: { "atom_id" => atom.id, "flow" => "recording_finish" }
-    )
-
-    return "" if result[:error].present?
-
-    AiService::Client.text_from(result)
-  rescue StandardError
-    ""
   end
 
   # The broadcast text must match the event: starting a session used to be
