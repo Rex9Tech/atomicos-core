@@ -101,7 +101,7 @@ class V1::RecordingsController < V1::ApplicationController
       @recording.update!(atom: atom, status: RecordingConstants::Status::COMPLETED)
     end
 
-    apply_recording_content(atom, transcript: transcript, note: note)
+    apply_recording_content(atom, transcript: transcript, note: note, segments: params[:segments])
 
     broadcast_recording_event(
       NotificationConstants::NotificationType::RECORDING_COMPLETED,
@@ -126,18 +126,28 @@ class V1::RecordingsController < V1::ApplicationController
   # job (Recordings::SummarizeAtomJob): a long transcript takes longer to
   # summarize than the mobile client's HTTP timeout, and ending a meeting must
   # never wait on an LLM.
-  def apply_recording_content(atom, transcript:, note:)
+  #
+  # When the app sends the speaker-labeled segments collected during the live
+  # session they are stored as-is, so the atom transcript keeps its speakers
+  # even before any server-side diarization pass runs.
+  def apply_recording_content(atom, transcript:, note:, segments: [])
     return if atom.nil?
 
     updates = {}
     updates[:note] = note if note.present?
-    updates[:transcript_segments] = [ { "speaker" => "Speaker", "text" => transcript } ] if transcript.present?
+    updates[:transcript_segments] = normalize_transcript_segments(segments) if segments.present?
+    updates[:transcript_segments] ||= [ { "speaker" => "Speaker", "text" => transcript } ] if transcript.present?
 
     # A finished recording must NEVER hang in "processing": with live captions
     # off there is no transcript to summarize, but the recording itself is done
     # either way. The summary lands later and broadcasts an atom update.
     updates[:status] = AtomConstants::Status::COMPLETED
     updates[:recording_status] = AtomConstants::RecordingStatus::COMPLETED
+
+    if updates[:transcript_segments].present?
+      speakers = updates[:transcript_segments].filter_map { |segment| segment["speaker"] }.uniq
+      updates[:participants_count] = speakers.length if speakers.length > 1
+    end
 
     atom.update!(updates) if updates.present?
 
@@ -146,6 +156,25 @@ class V1::RecordingsController < V1::ApplicationController
     end
   rescue StandardError => e
     Rails.logger.error("[ATOM-RECORDING] Failed to process recording atom #{atom.id}: #{e.message}")
+  end
+
+  # Keeps only well-formed speaker turns, capped so a buggy client cannot
+  # store an unbounded payload on the atom.
+  def normalize_transcript_segments(segments)
+    Array(segments).first(2000).filter_map do |segment|
+      next unless segment.respond_to?(:[])
+
+      text = segment[:text].to_s.strip
+      next if text.empty?
+
+      speaker = segment[:speaker].to_s.strip.presence || "Speaker"
+      {
+        "speaker" => speaker,
+        "text" => text,
+        "start" => segment[:start].to_f.round(2),
+        "end" => segment[:end].to_f.round(2)
+      }
+    end
   end
 
   # The broadcast text must match the event: starting a session used to be

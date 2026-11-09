@@ -5,6 +5,7 @@ module SpeechConstants
   module Live
     TYPE_PARTIAL = "partial".freeze
     TYPE_FINAL = "final".freeze
+    TYPE_DIARIZED = "diarized".freeze
     TYPE_ERROR = "error".freeze
 
     PATH_SPEECH_CONFIG = "speech.config".freeze
@@ -31,6 +32,16 @@ module SpeechConstants
     FORMAT = "simple".freeze
     IDLE_TIMEOUT_SECONDS = 30
     STREAM_PREFIX = "speech_live_user".freeze
+
+    # Speaker diarization happens over recent audio windows: the streaming
+    # provider transcribes but cannot label voices, so finalized turns trigger
+    # a Gemini audio-understanding pass (SpeechService::Diarizer) whose labeled
+    # segments are pushed to the client as "diarized" events.
+    DIARIZATION_BUFFER_SECONDS = 240
+    DIARIZATION_WINDOW_SECONDS = 90
+    DIARIZATION_MIN_SECONDS = 8
+    DIARIZATION_MIN_GAP_SECONDS = 12
+    DIARIZATION_OVERLAP_SECONDS = 4
   end
 
   module Stt

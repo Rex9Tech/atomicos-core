@@ -235,6 +235,10 @@ module AppConfig
   # cost estimates — tune to the provider's current rate card.
   GEMINI_LIVE_AUDIO_USD_PER_MINUTE = env_or.call("GEMINI_LIVE_AUDIO_USD_PER_MINUTE", "0.0015")
   GEMINI_STT_FALLBACK_MODEL   = env_or.call("GEMINI_STT_FALLBACK_MODEL", "gemini-3.5-flash-lite")
+  # Live speaker diarization (see SpeechService::Diarizer); audio-understanding
+  # model, not the transcribe model — the transcribe endpoint has no labels.
+  GEMINI_DIARIZATION_MODEL    = env_or.call("GEMINI_DIARIZATION_MODEL", "gemini-3.5-flash")
+  GEMINI_DIARIZATION_FALLBACK_MODEL = env_or.call("GEMINI_DIARIZATION_FALLBACK_MODEL", "gemini-3.5-flash-lite")
   GEMINI_CHAT_FALLBACK_MODEL  = env_or.call("GEMINI_CHAT_FALLBACK_MODEL", "gemini-3.5-flash")
   GEMINI_THINKING_BUDGET      = env_or.call("GEMINI_THINKING_BUDGET", "0").to_i
   GEMINI_INLINE_MAX_BYTES     = env_or.call("GEMINI_INLINE_MAX_BYTES", (15 * 1024 * 1024).to_s).to_i
