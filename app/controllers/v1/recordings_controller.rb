@@ -121,6 +121,8 @@ class V1::RecordingsController < V1::ApplicationController
 
   private
 
+  SEGMENT_COVERAGE_TOLERANCE_SECONDS = 20
+
   # Folds the device's live transcript (and any note typed during the session)
   # into the finished recording's atom. The AI summary runs in a background
   # job (Recordings::SummarizeAtomJob): a long transcript takes longer to
@@ -135,7 +137,11 @@ class V1::RecordingsController < V1::ApplicationController
 
     updates = {}
     updates[:note] = note if note.present?
-    updates[:transcript_segments] = normalize_transcript_segments(segments) if segments.present?
+
+    normalized_segments = normalize_transcript_segments(segments)
+    if segments_cover_recording?(normalized_segments, atom.duration_secs)
+      updates[:transcript_segments] = normalized_segments
+    end
     updates[:transcript_segments] ||= [ { "speaker" => "Speaker", "text" => transcript } ] if transcript.present?
 
     # A finished recording must NEVER hang in "processing": with live captions
@@ -156,6 +162,21 @@ class V1::RecordingsController < V1::ApplicationController
     end
   rescue StandardError => e
     Rails.logger.error("[ATOM-RECORDING] Failed to process recording atom #{atom.id}: #{e.message}")
+  end
+
+  # Live diarization trails the captions by a window. When its last labelled
+  # turn stops well short of the recording length the plain transcript is
+  # stored instead: a labelled transcript must never drop the tail of a
+  # meeting just because a diarization pass was still in flight.
+  def segments_cover_recording?(segments, duration_secs)
+    return false if segments.blank?
+
+    duration = duration_secs.to_f
+    return true if duration <= 0
+
+    last_end = segments.map { |segment| segment["end"].to_f }.max.to_f
+    tolerance = [ SEGMENT_COVERAGE_TOLERANCE_SECONDS, duration * 0.15 ].min
+    last_end >= duration - tolerance || last_end >= duration * 0.85
   end
 
   # Keeps only well-formed speaker turns, capped so a buggy client cannot
