@@ -48,6 +48,10 @@ class Atoms::ProcessAssetContentJob < ApplicationJob
     atom.update!(completion)
 
     broadcast(atom)
+
+    # The transcript above is unlabelled; upgrade it with speaker turns from
+    # the same audio now that it is stored server-side.
+    Atoms::DiarizeTranscriptJob.perform_later(atom.id)
   rescue ActiveRecord::RecordNotFound
     # Atom deleted while queued — nothing to do.
   end

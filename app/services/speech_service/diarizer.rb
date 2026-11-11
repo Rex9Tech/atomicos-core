@@ -46,6 +46,14 @@ module SpeechService
       new.diarize(pcm: pcm, language: language, samples: samples)
     end
 
+    # Post-finish diarization of a whole recording. The audio is normalized to
+    # PCM16@16k, walked in chunks, and every chunk is diarized with the voices
+    # seen so far as reference samples — the same mechanism the live channel
+    # uses, so a two-voice meeting reads Speaker 1 / Speaker 2 end to end.
+    def self.diarize_full_audio(bytes:, language: nil)
+      new.diarize_full_audio(bytes: bytes, language: language)
+    end
+
     def initialize
       primary = AppConfig::GEMINI_DIARIZATION_MODEL.to_s.strip
       fallback = AppConfig::GEMINI_DIARIZATION_FALLBACK_MODEL.to_s.strip
@@ -69,6 +77,61 @@ module SpeechService
       nil
     end
 
+    # --- Full-recording mode --------------------------------------------------
+
+    AUDIO_BYTES_PER_SECOND = 32_000
+    FULL_AUDIO_CHUNK_SECONDS = 300
+    FULL_AUDIO_MAX_SECONDS = 90 * 60
+    MAX_SPEAKERS = 6
+    SAMPLE_SECONDS = 3
+
+    def diarize_full_audio(bytes:, language: nil)
+      pcm = normalize_to_pcm16(bytes)
+      return nil if pcm.blank?
+
+      total_seconds = pcm.bytesize / AUDIO_BYTES_PER_SECOND.to_f
+      return nil if total_seconds > FULL_AUDIO_MAX_SECONDS
+
+      samples = []
+      segments = []
+      offset = 0.0
+
+      each_chunk(pcm) do |chunk|
+        prefix = samples.sum { |sample| sample[:pcm].bytesize } / AUDIO_BYTES_PER_SECOND.to_f
+        result = self.class.diarize(pcm: chunk, language: language, samples: samples)
+        if result.blank?
+          # First chunk failing is a real failure; a later one keeps what we
+          # have — a partially labelled transcript beats none.
+          return segments.presence if offset.positive?
+
+          return nil
+        end
+
+        new_labels = {}
+        result.each do |segment|
+          text = segment[:text].to_s.strip
+          next if text.empty?
+          next if segment[:end_s].to_f <= prefix + 0.3 # reference-sample leak
+
+          label, is_new = speaker_label_for(segment[:speaker], samples, new_labels)
+          capture_speaker_sample(label, samples, chunk, segment[:start_s], segment[:end_s]) if is_new
+
+          start_s = [ segment[:start_s].to_f - prefix, 0.0 ].max
+          end_s = [ segment[:end_s].to_f - prefix, start_s + 0.2 ].max
+          segments << {
+            speaker: label,
+            text: text,
+            start_s: (offset + start_s).round(2),
+            end_s: (offset + end_s).round(2)
+          }
+        end
+
+        offset += chunk.bytesize / AUDIO_BYTES_PER_SECOND.to_f
+      end
+
+      segments.presence
+    end
+
     private
 
     def build_prompt(language, samples)
@@ -88,6 +151,85 @@ module SpeechService
       end
 
       prompt
+    end
+
+    # --- full-recording mode helpers -----------------------------------------
+
+    def each_chunk(pcm)
+      chunk_bytes = FULL_AUDIO_CHUNK_SECONDS * AUDIO_BYTES_PER_SECOND
+      offset = 0
+      while offset < pcm.bytesize
+        yield pcm.byteslice(offset, chunk_bytes)
+        offset += chunk_bytes
+      end
+    end
+
+    # Whatever the client uploaded (WAV, m4a, ...) becomes raw PCM16@16k —
+    # ffmpeg when it can, a WAV header strip when it cannot.
+    def normalize_to_pcm16(bytes)
+      raw = bytes.to_s.b
+      return nil if raw.blank?
+
+      require "open3"
+      require "tempfile"
+
+      input = Tempfile.new([ "atomicos_diar_in", ".audio" ])
+      output = Tempfile.new([ "atomicos_diar_out", ".pcm" ])
+      input.binmode
+      input.write(raw)
+      input.flush
+
+      _stdout, _stderr, status = Open3.capture3(
+        "ffmpeg", "-v", "error", "-y", "-i", input.path,
+        "-ac", "1", "-ar", "16000", "-f", "s16le", output.path
+      )
+      output.binmode
+      pcm = status.success? ? output.read : nil
+      return pcm.to_s.b if pcm.present?
+
+      strip_wav_header(raw)
+    rescue => e
+      Rails.logger.warn("#{LOG_PREFIX} normalize failed: #{e.message}")
+      strip_wav_header(raw)
+    ensure
+      input&.close!
+      output&.close!
+    end
+
+    def strip_wav_header(raw)
+      return nil unless raw.bytesize > 44 && raw[0, 4] == "RIFF" && raw[8, 4] == "WAVE"
+
+      raw.byteslice(44, raw.bytesize - 44)
+    end
+
+    def speaker_label_for(model_speaker, samples, new_labels)
+      index = model_speaker.to_s[/\d+/]&.to_i
+
+      if index && index >= 1 && index <= samples.length
+        [ samples[index - 1][:label], false ]
+      elsif index && new_labels.key?(index)
+        [ new_labels[index], true ]
+      else
+        label = "Speaker #{samples.length + 1}"
+        new_labels[index] = label if index
+        [ label, true ]
+      end
+    end
+
+    def capture_speaker_sample(label, samples, chunk, start_s, end_s)
+      return if samples.length >= MAX_SPEAKERS
+
+      from = (start_s.to_f * AUDIO_BYTES_PER_SECOND).round
+      length = [
+        ((end_s.to_f - start_s.to_f) * AUDIO_BYTES_PER_SECOND),
+        SAMPLE_SECONDS * AUDIO_BYTES_PER_SECOND
+      ].min.round
+      return if from.negative? || length < AUDIO_BYTES_PER_SECOND / 2
+
+      sample = chunk.byteslice(from, length)
+      return if sample.nil? || sample.bytesize < AUDIO_BYTES_PER_SECOND / 2
+
+      samples << { label: label, pcm: sample }
     end
 
     def call_model(model, wav, prompt)

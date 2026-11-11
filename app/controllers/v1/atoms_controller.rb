@@ -351,23 +351,40 @@ class V1::AtomsController < V1::ApplicationController
     return unless @atom.source == AtomConstants::Source::MEETING
     return unless asset.format == AssetConstants::AssetFormat::AUDIO
     return unless asset.type != AssetConstants::AssetType::ATTACHMENT
-    return if @atom.transcript_segments.to_a.any? || @atom.summary_blocks.to_a.any?
-    return if @atom.metadata["server_stt_queued"]
 
-    unless CreditsService.charge_meeting_summary(
-      user: @atom.user,
-      metadata: { "atom_id" => @atom.id, "flow" => "recording_audio" }
-    )
-      Rails.logger.info("[CREDITS] skipping server STT for atom #{@atom.id}: insufficient credits")
+    transcript_ready = @atom.transcript_segments.to_a.any? || @atom.summary_blocks.to_a.any?
+
+    # Caption-off meetings arrive as audio only: transcribe + summarize from
+    # the uploaded audio (same as the upload flow) so they still get a summary.
+    unless transcript_ready
+      return if @atom.metadata["server_stt_queued"]
+
+      unless CreditsService.charge_meeting_summary(
+        user: @atom.user,
+        metadata: { "atom_id" => @atom.id, "flow" => "recording_audio" }
+      )
+        Rails.logger.info("[CREDITS] skipping server STT for atom #{@atom.id}: insufficient credits")
+        return
+      end
+
+      @atom.update!(
+        status: AtomConstants::Status::PROCESSING,
+        recording_status: AtomConstants::RecordingStatus::PROCESSING,
+        metadata: @atom.metadata.merge("server_stt_queued" => true)
+      )
+      Atoms::ProcessAssetContentJob.perform_later(@atom.id)
       return
     end
 
-    @atom.update!(
-      status: AtomConstants::Status::PROCESSING,
-      recording_status: AtomConstants::RecordingStatus::PROCESSING,
-      metadata: @atom.metadata.merge("server_stt_queued" => true)
-    )
-    Atoms::ProcessAssetContentJob.perform_later(@atom.id)
+    # Caption-on meetings already carry a transcript; upgrade it with real
+    # speaker diarization from the same audio. The live pipeline diarizes
+    # slightly behind the audio (its tail can be missing) and short
+    # recordings fall back to unlabelled text, so the atom is re-diarized
+    # from the complete recording.
+    return if @atom.metadata["diarized"].present? || @atom.metadata["diarization_queued"].present?
+
+    @atom.update!(metadata: @atom.metadata.merge("diarization_queued" => true))
+    Atoms::DiarizeTranscriptJob.perform_later(@atom.id)
   end
 
   def atom_payload(atom)
