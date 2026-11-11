@@ -31,7 +31,7 @@ module SpeechService
       {"segments":[{"speaker":"Speaker 1","text":"...","start":0.0,"end":2.4}]}
       Rules:
       - one segment per continuous speaker turn;
-      - start/end are seconds from the beginning of this audio clip;
+      - start/end are seconds from the beginning of the audio you are given;
       - keep the spoken language unchanged (do not translate);
       - never summarize, never add commentary, never invent words.
     TXT
@@ -39,8 +39,11 @@ module SpeechService
     # Returns an array of hashes:
     #   [{ speaker: "Speaker 1", text: "...", start_s: 0.0, end_s: 2.4 }, ...]
     # nil when every model fails or the payload cannot be parsed.
-    def self.diarize(pcm:, language: nil, prior: [])
-      new.diarize(pcm: pcm, language: language, prior: prior)
+    #
+    # `samples` is an ordered list of known voices ({ label:, pcm: }) that is
+    # prepended to the audio as short reference samples (see build_prompt).
+    def self.diarize(pcm:, language: nil, samples: [])
+      new.diarize(pcm: pcm, language: language, samples: samples)
     end
 
     def initialize
@@ -50,12 +53,13 @@ module SpeechService
         .reject(&:blank?).uniq
     end
 
-    def diarize(pcm:, language: nil, prior: [])
+    def diarize(pcm:, language: nil, samples: [])
       return nil if pcm.blank?
       return nil if AppConfig::GEMINI_API_KEY.blank?
 
-      wav = wrap_wav(pcm)
-      prompt = build_prompt(language, prior)
+      prefix = samples.filter_map { |sample| sample[:pcm] }.join
+      wav = wrap_wav(prefix + pcm)
+      prompt = build_prompt(language, samples)
 
       @models.each do |model|
         segments = call_model(model, wav, prompt)
@@ -67,27 +71,27 @@ module SpeechService
 
     private
 
-    def build_prompt(language, prior)
+    def build_prompt(language, samples)
       prompt = INSTRUCTION.dup
       lang = language.to_s.strip
       prompt << "\nThe audio language is #{lang}."
-      unless prior.blank?
-        lines = prior.last(6).filter_map do |segment|
-          text = segment[:text].to_s.strip
-          next if text.blank?
 
-          "#{segment[:speaker]}: #{text}"
-        end
-        unless lines.empty?
-          prompt << "\n\nAlready-labeled earlier speech (a voice that returns keeps the SAME " \
-                    "speaker number; continue numbering new voices after the highest number used):\n"
-          prompt << lines.join("\n")
-        end
+      unless samples.blank?
+        list = samples.each_with_index.map { |sample, index| "#{index + 1}: #{sample[:label]}" }.join(", ")
+        prompt << "\n\n" << <<~CONTEXT
+          The clip begins with #{samples.length} reference samples of voices already heard in this
+          meeting, in this order — #{list}. DO NOT transcribe the reference samples.
+          In the rest of the clip, label each turn with the speaker from the reference samples
+          whose voice matches; only use a new number (after #{samples.length}) for a voice that
+          matches none of the samples.
+        CONTEXT
       end
+
       prompt
     end
 
     def call_model(model, wav, prompt)
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       2.times do |attempt|
         response = post_generate(model, wav, prompt)
         code = response.code.to_i
@@ -95,6 +99,8 @@ module SpeechService
         if code == 200
           segments = parse_segments(extract_text(response.body))
           if segments
+            ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
+            Rails.logger.info("#{LOG_PREFIX} #{model}: #{segments.length} segments in #{ms}ms")
             return segments
           end
 

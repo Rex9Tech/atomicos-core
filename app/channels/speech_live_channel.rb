@@ -19,15 +19,17 @@ class SpeechLiveChannel < ApplicationCable::Channel
     @run_error = nil
     @language = params[:language].to_s
 
-    # Diarization state: a rolling PCM buffer plus the labels already sent to
-    # the client, so overlapping windows never repeat a sentence.
+    # Diarization state: a rolling PCM buffer, the labels already sent to the
+    # client, and a short voice sample per known speaker so every window can
+    # match voices itself (the model restarts numbering per call, so matching
+    # through audio samples is what keeps "Speaker 1" stable all session).
     @audio_buffer = +"".b
     @buffer_mutex = Mutex.new
     @diar_mutex = Mutex.new
     @trimmed_bytes = 0
     @diarized_until_seconds = 0.0
     @emitted_segments = []
-    @next_speaker_index = 0
+    @speaker_samples = []
     @diarizing = false
     @last_diarized_at = nil
 
@@ -133,13 +135,18 @@ class SpeechLiveChannel < ApplicationCable::Channel
     return if pcm.nil? || pcm.empty?
 
     @diarizing = true
-    prior = @emitted_segments.last(4).map { |segment| segment.slice(:speaker, :text) }
+    samples = @speaker_samples.first(SpeechConstants::Live::DIARIZATION_MAX_SPEAKERS)
+                             .map { |sample| sample.slice(:label, :pcm) }
+    prefix_seconds = samples.sum { |sample| sample[:pcm].bytesize } /
+                     SpeechConstants::Live::AUDIO_BYTES_PER_SECOND.to_f
     language = @language
 
     Thread.new do
       begin
-        segments = SpeechService::Diarizer.diarize(pcm: pcm, language: language, prior: prior)
-        handle_diarization(segments, window_start, window_end) if segments.present? && !@teardown
+        segments = SpeechService::Diarizer.diarize(pcm: pcm, language: language, samples: samples)
+        if segments.present? && !@teardown
+          handle_diarization(segments, window_start, window_end, samples, prefix_seconds, pcm)
+        end
       rescue => e
         Rails.logger.warn("[SpeechLiveChannel] diarization error: #{e.class}: #{e.message}")
       ensure
@@ -149,15 +156,14 @@ class SpeechLiveChannel < ApplicationCable::Channel
     end
   end
 
-  # Window = new audio since the last pass plus a 4s overlap (the model needs
-  # context at the boundary), capped at 90s to keep each pass fast.
+  # Window = everything since the last pass, capped so one pass stays fast.
   def build_window
     @buffer_mutex.synchronize do
       bytes_per_second = SpeechConstants::Live::AUDIO_BYTES_PER_SECOND.to_f
       buffer_start = @trimmed_bytes / bytes_per_second
       buffer_end = (@trimmed_bytes + @audio_buffer.bytesize) / bytes_per_second
 
-      from = [ @diarized_until_seconds - SpeechConstants::Live::DIARIZATION_OVERLAP_SECONDS, buffer_start ].max
+      from = [ @diarized_until_seconds, buffer_start ].max
       from = [ from, buffer_end - SpeechConstants::Live::DIARIZATION_WINDOW_SECONDS ].max
       return [ nil, nil, nil ] if buffer_end - from < SpeechConstants::Live::DIARIZATION_MIN_SECONDS
 
@@ -167,35 +173,30 @@ class SpeechLiveChannel < ApplicationCable::Channel
     end
   end
 
-  # Converts window-relative segments to absolute session time, skips anything
-  # already emitted, keeps speaker numbers stable across windows and pushes the
-  # new turns to the client.
-  def handle_diarization(segments, window_start, window_end)
+  # Converts the model's window-relative segments into session time, keeps
+  # speaker numbers stable through the reference samples and pushes the new
+  # turns to the client.
+  def handle_diarization(segments, window_start, window_end, samples, prefix_seconds, pcm)
     batch = []
 
     @diar_mutex.synchronize do
-      tail = @emitted_segments.last(8)
-      mapping = {}
+      new_labels = {}
 
       segments.each do |segment|
         text = segment[:text].to_s.strip
         next if text.empty?
+        next if reference_segment?(segment, prefix_seconds)
+
+        start_s = [ segment[:start_s].to_f - prefix_seconds, 0.0 ].max
+        end_s = [ segment[:end_s].to_f - prefix_seconds, start_s + 0.2 ].max
+        abs_start = (window_start + start_s).round(2)
+        abs_end = (window_start + end_s).round(2)
 
         normalized = normalize_text(text)
-        next if tail.any? { |candidate| candidate[:normalized] == normalized }
+        next if @emitted_segments.last(3).any? { |candidate| candidate[:normalized] == normalized }
 
-        abs_start = (window_start + segment[:start_s].to_f).round(2)
-        abs_end = (window_start + segment[:end_s].to_f).round(2)
-        abs_end = (abs_start + 0.2).round(2) if abs_end <= abs_start
-        next if abs_end <= @diarized_until_seconds + 0.2
-
-        previous = tail.find do |candidate|
-          candidate[:normalized] == normalized ||
-            (normalized.length >= 8 &&
-              (candidate[:normalized].include?(normalized) || normalized.include?(candidate[:normalized])))
-        end
-
-        label = speaker_label_for(segment[:speaker], previous, mapping)
+        label, is_new = speaker_label(segment[:speaker], samples, new_labels)
+        capture_speaker_sample(label, pcm, start_s, end_s) if is_new
 
         batch << {
           "speaker" => label,
@@ -213,28 +214,58 @@ class SpeechLiveChannel < ApplicationCable::Channel
         }
       end
 
-      @emitted_segments.shift(@emitted_segments.length - MAX_EMITTED_SEGMENTS) if @emitted_segments.length > MAX_EMITTED_SEGMENTS
+      if @emitted_segments.length > MAX_EMITTED_SEGMENTS
+        @emitted_segments.shift(@emitted_segments.length - MAX_EMITTED_SEGMENTS)
+      end
       @diarized_until_seconds = [ @diarized_until_seconds, window_end.to_f ].max
     end
 
     return if batch.empty?
 
+    Rails.logger.info(
+      "[SpeechLiveChannel] diarized #{batch.length} turns " \
+      "(samples=#{@speaker_samples.length}, batch=#{batch.map { |s| s['speaker'] }.uniq.join('/')})"
+    )
     push_event(type: SpeechConstants::Live::TYPE_DIARIZED, segments: batch)
   end
 
-  def next_speaker_label
-    @next_speaker_index += 1
-    "Speaker #{@next_speaker_index}"
+  # The model sometimes also transcribes a few words of the reference
+  # samples; those must never reach the transcript.
+  def reference_segment?(segment, prefix_seconds)
+    segment[:end_s].to_f <= prefix_seconds + 0.3
   end
 
-  # A window's model labels ("Speaker 1") are local to that window; the overlap
-  # match tells us when a voice was already labelled earlier in the session.
-  def speaker_label_for(model_speaker, previous, mapping)
-    if previous
-      mapping[model_speaker] = previous[:speaker]
+  # Speaker numbers are defined by the reference samples: "Speaker k" in the
+  # reply means "the k-th sample". Unmatched voices are new speakers and get
+  # the next free number plus a stored sample so later windows can match them.
+  def speaker_label(model_speaker, samples, new_labels)
+    index = model_speaker.to_s[/\d+/]&.to_i
+
+    if index && index >= 1 && index <= samples.length
+      [ samples[index - 1][:label], false ]
+    elsif index && new_labels.key?(index)
+      [ new_labels[index], true ]
     else
-      mapping[model_speaker] ||= next_speaker_label
+      label = "Speaker #{@speaker_samples.length + 1}"
+      new_labels[index] = label if index
+      [ label, true ]
     end
+  end
+
+  def capture_speaker_sample(label, pcm, start_s, end_s)
+    return if @speaker_samples.length >= SpeechConstants::Live::DIARIZATION_MAX_SPEAKERS
+
+    bytes_per_second = SpeechConstants::Live::AUDIO_BYTES_PER_SECOND
+    from = (start_s * bytes_per_second).round
+    length = [ (end_s - start_s) * bytes_per_second, SpeechConstants::Live::DIARIZATION_SAMPLE_SECONDS * bytes_per_second ].min.round
+    return if from.negative? || length < bytes_per_second / 2
+
+    sample = pcm.byteslice(from, length)
+    return if sample.nil? || sample.bytesize < bytes_per_second / 2
+
+    @speaker_samples << { label: label, pcm: sample }
+  rescue => e
+    Rails.logger.warn("[SpeechLiveChannel] sample capture failed: #{e.message}")
   end
 
   def normalize_text(value)

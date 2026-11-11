@@ -36,12 +36,15 @@ module SpeechConstants
     # Speaker diarization happens over recent audio windows: the streaming
     # provider transcribes but cannot label voices, so finalized turns trigger
     # a Gemini audio-understanding pass (SpeechService::Diarizer) whose labeled
-    # segments are pushed to the client as "diarized" events.
-    DIARIZATION_BUFFER_SECONDS = 240
-    DIARIZATION_WINDOW_SECONDS = 90
+    # segments are pushed to the client as "diarized" events. Every window
+    # carries short voice samples of the speakers known so far so the model
+    # keeps their numbers stable across windows.
+    DIARIZATION_BUFFER_SECONDS = 300
+    DIARIZATION_WINDOW_SECONDS = 60
     DIARIZATION_MIN_SECONDS = 8
-    DIARIZATION_MIN_GAP_SECONDS = 12
-    DIARIZATION_OVERLAP_SECONDS = 4
+    DIARIZATION_MIN_GAP_SECONDS = 10
+    DIARIZATION_MAX_SPEAKERS = 6
+    DIARIZATION_SAMPLE_SECONDS = 3
   end
 
   module Stt
