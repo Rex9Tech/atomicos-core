@@ -168,7 +168,7 @@ module AppConfig
   # 📧 Email Delivery (Brevo & SMTP)
   # ----------------------------------------------------------------------------
   EMAIL_PROVIDER              = env_or.call("EMAIL_PROVIDER", "brevo")
-  FROM_EMAIL                  = env_or.call("FROM_EMAIL", "support@rexone.com")
+  FROM_EMAIL                  = env_or.call("FROM_EMAIL", "support@atomicos.io")
   BREVO_API_KEY               = env_or.call("BREVO_API_KEY", "")
   BREVO_BASE_URL              = env_or.call("BREVO_BASE_URL", "https://api.brevo.com/v3")
   SMTP_ADDRESS                = env_or.call("SMTP_ADDRESS", "smtp.gmail.com")

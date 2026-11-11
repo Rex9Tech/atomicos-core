@@ -5,18 +5,18 @@ require "erb"
 
 module EmailService
   class TemplateRenderer
-    DEFAULT_DISCLAIMER = "You are receiving this email as a registered user of RexOne."
+    DEFAULT_DISCLAIMER = "You are receiving this email as a registered user of AtomicOS."
 
     TEMPLATES = {
       "email_confirmation" => {
-        subject: "Confirm your RexOne email",
+        subject: "Confirm your AtomicOS email",
         headline: "Confirm your email",
         body: "Use this code to confirm {{email}}.",
         highlight_key: :code,
         disclaimer: "If you did not request this, you can safely ignore this email."
       },
       "password_reset" => {
-        subject: "Reset your RexOne passcode",
+        subject: "Reset your AtomicOS passcode",
         headline: "Reset your passcode",
         body: "We received a passcode reset request for {{email}}.",
         cta_text: "Reset passcode",
@@ -68,10 +68,10 @@ module EmailService
         disclaimer: "You can manage your subscription anytime in your account settings."
       },
       "welcome" => {
-        subject: "Welcome to RexOne",
-        headline: "Welcome to RexOne",
-        body: "Hi {{user_name}}, thanks for joining RexOne. We are excited to have you here.",
-        disclaimer: "You are receiving this email as a registered user of RexOne."
+        subject: "Welcome to AtomicOS",
+        headline: "Welcome to AtomicOS",
+        body: "Hi {{user_name}}, thanks for joining AtomicOS. We are excited to have you here.",
+        disclaimer: "You are receiving this email as a registered user of AtomicOS."
       },
       "sign_in_alert" => {
         subject: "Security alert: new sign-in",
@@ -116,7 +116,7 @@ module EmailService
         details_html = build_details_html(resolved_details, data) if resolved_details.present?
 
         resolved_cta_url = cta_url.presence || data[:cta_url].presence || data[:reset_url].presence || data[:link].presence
-        resolved_cta_text = cta_text.presence || data[:cta_text].presence || "Open RexOne"
+        resolved_cta_text = cta_text.presence || data[:cta_text].presence || "Open AtomicOS"
         cta_html = build_cta_html(resolved_cta_url, resolved_cta_text, data) if resolved_cta_url.present?
 
         resolved_disclaimer = disclaimer.presence || data[:disclaimer].presence || DEFAULT_DISCLAIMER
@@ -242,7 +242,7 @@ module EmailService
         <<~HTML
           <tr>
             <td style="padding:24px 0;">
-              <div style="font-size:32px;letter-spacing:8px;font-weight:700;color:#ffffff;background:#12040a;border:1px solid #ff3048;border-radius:14px;padding:18px;text-align:center;box-shadow:0 0 20px rgba(255,48,72,0.2);">
+              <div style="font-size:32px;letter-spacing:8px;font-weight:700;color:#ffffff;background:#08130D;border:1px solid #22C55E;border-radius:14px;padding:18px;text-align:center;box-shadow:0 0 20px rgba(34,197,94,0.25);">
                 #{escaped}
               </div>
             </td>
@@ -258,7 +258,7 @@ module EmailService
           escaped_val = ERB::Util.html_escape(interpolate_plain(val.to_s, data))
           <<~HTML
             <tr>
-              <td style="padding:8px 0;color:#b9a7af;font-size:14px;">#{escaped_key}</td>
+              <td style="padding:8px 0;color:#A9C6B6;font-size:14px;">#{escaped_key}</td>
               <td align="right" style="padding:8px 0;color:#ffffff;font-weight:600;font-size:14px;">#{escaped_val}</td>
             </tr>
           HTML
@@ -267,7 +267,7 @@ module EmailService
         <<~HTML
           <tr>
             <td style="padding:20px 0;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#12040a;border:1px solid #360c18;border-radius:14px;padding:16px;color:#f8f4f6;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0A1A12;border:1px solid #1E3A2A;border-radius:14px;padding:16px;color:#F2F7F4;">
                 #{rows}
               </table>
             </td>
@@ -288,8 +288,8 @@ module EmailService
             <td style="padding:24px 0;">
               <table role="presentation" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td align="center" style="border-radius:12px;background:#ff3048;">
-                    <a href="#{escaped_url}" style="display:inline-block;padding:14px 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;">
+                  <td align="center" style="border-radius:12px;background:#22C55E;">
+                    <a href="#{escaped_url}" style="display:inline-block;padding:14px 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#04110B;text-decoration:none;border-radius:12px;">
                       #{escaped_text}
                     </a>
                   </td>
@@ -298,9 +298,9 @@ module EmailService
             </td>
           </tr>
           <tr>
-            <td style="font-size:13px;line-height:1.6;color:#b9a7af;">
+            <td style="font-size:13px;line-height:1.6;color:#A9C6B6;">
               If the button does not work, copy and paste this link into your browser:<br/>
-              <a href="#{escaped_url}" style="color:#ff6b7d;text-decoration:none;word-break:break-all;">#{escaped_url}</a>
+              <a href="#{escaped_url}" style="color:#4ADE80;text-decoration:none;word-break:break-all;">#{escaped_url}</a>
             </td>
           </tr>
         HTML
@@ -315,20 +315,20 @@ module EmailService
               <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
               <title>#{ERB::Util.html_escape(subject)}</title>
             </head>
-            <body style="margin:0;padding:0;background:#14040b;color:#f8f4f6;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#14040b;padding:32px 16px;">
+            <body style="margin:0;padding:0;background:#08130D;color:#F2F7F4;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#08130D;padding:32px 16px;">
                 <tr>
                   <td align="center">
-                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#210912;border:1px solid #5a1020;border-radius:18px;padding:32px 28px;box-shadow:0 8px 32px rgba(255,48,72,0.08);">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#10231A;border:1px solid #23412E;border-radius:18px;padding:32px 28px;box-shadow:0 8px 32px rgba(34,197,94,0.10);">
                       <!-- Brand Header -->
                       <tr>
-                        <td style="padding-bottom:24px;border-bottom:1px solid #360c18;">
+                        <td style="padding-bottom:24px;border-bottom:1px solid #1E3A2A;">
                           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                             <tr>
-                              <td style="font-size:20px;font-weight:900;letter-spacing:1px;color:#ff3048;">
-                                REX<span style="color:#ffffff;">ONE</span>
+                              <td style="font-size:20px;font-weight:900;letter-spacing:1px;color:#ffffff;">
+                                ATOMIC<span style="color:#22C55E;">OS</span>
                               </td>
-                              <td align="right" style="font-size:12px;color:#b9a7af;letter-spacing:0.5px;text-transform:uppercase;">
+                              <td align="right" style="font-size:12px;color:#A9C6B6;letter-spacing:0.5px;text-transform:uppercase;">
                                 ALERT CENTER
                               </td>
                             </tr>
@@ -341,7 +341,7 @@ module EmailService
 
                       <!-- Main Body Message -->
                       <tr>
-                        <td style="padding-top:16px;font-size:15px;line-height:1.6;color:#e6d9df;">
+                        <td style="padding-top:16px;font-size:15px;line-height:1.6;color:#DCE9E1;">
                           #{body_html}
                         </td>
                       </tr>
@@ -357,16 +357,16 @@ module EmailService
 
                       <!-- Footer / Disclaimer -->
                       <tr>
-                        <td style="padding-top:28px;border-top:1px solid #360c18;margin-top:24px;">
+                        <td style="padding-top:28px;border-top:1px solid #1E3A2A;margin-top:24px;">
                           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                             <tr>
-                              <td style="font-size:12px;line-height:1.6;color:#b9a7af;">
+                              <td style="font-size:12px;line-height:1.6;color:#A9C6B6;">
                                 #{disclaimer}
                               </td>
                             </tr>
                             <tr>
-                              <td style="padding-top:12px;font-size:11px;color:#78666f;">
-                                &copy; 2026 RexOne Ecosystem. All rights reserved.
+                              <td style="padding-top:12px;font-size:11px;color:#7E9C8B;">
+                                &copy; 2026 AtomicOS. All rights reserved.
                               </td>
                             </tr>
                           </table>
