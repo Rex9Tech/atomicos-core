@@ -54,6 +54,10 @@ class SpeechLiveChannel < ApplicationCable::Channel
     @audio_bytes += chunk.bytesize
     buffer_audio(chunk)
     @session.write_audio(chunk)
+    # Diarization is driven by the audio itself, never by turn finals: with
+    # continuous speech (podcasts, meetings without pauses) the provider never
+    # closes a turn, so finals can stay silent for minutes.
+    maybe_diarize
   rescue ArgumentError
     nil
   end
@@ -91,7 +95,6 @@ class SpeechLiveChannel < ApplicationCable::Channel
     case event[:type]
     when SpeechConstants::Live::TYPE_FINAL
       @transcript_chars += event[:text].to_s.length
-      maybe_diarize
     when SpeechConstants::Live::TYPE_ERROR
       @run_error ||= event[:error]
     end
