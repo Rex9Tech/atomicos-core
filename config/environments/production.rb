@@ -22,6 +22,11 @@ Rails.application.configure do
   # Cache assets for far-future expiry since they are all digest stamped.
   config.public_file_server.headers = { "cache-control" => "public, max-age=#{1.year.to_i}" }
 
+  # The legacy SassC-based CSS compressor cannot parse modern media range
+  # syntax (e.g. `@media (width >= 40rem)` used by solid_web_ui/rails_pulse),
+  # which aborts `assets:precompile`. Modern CSS passes through untouched.
+  config.assets.css_compressor = nil
+
   # Enable serving of images, stylesheets, and JavaScripts from an asset server.
   # config.asset_host = "http://assets.example.com"
 

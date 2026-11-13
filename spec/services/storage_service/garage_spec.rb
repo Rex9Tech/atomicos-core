@@ -178,6 +178,49 @@ RSpec.describe StorageService::Garage do
         "prod" => { bytes: 500, objects: 1 }
       )
     end
+
+    it "reads cluster and bucket figures from the Garage v2 admin API" do
+      allow(adapter).to receive(:require).with("net/http")
+      allow(adapter).to receive(:require).with("json")
+      allow(s3_client).to receive(:list_objects_v2).and_return(
+        double("ListOutput", contents: [], is_truncated: false)
+      )
+
+      admin_payloads = {
+        "/v2/GetClusterStatus" => {
+          "nodes" => [
+            {
+              "dataPartition" => { "available" => 60_000, "total" => 100_000 },
+              "role" => { "capacity" => 120_000 }
+            }
+          ]
+        },
+        "/v2/ListBuckets" => [
+          { "id" => "bucket-1", "globalAliases" => [ "rexone" ] }
+        ],
+        "/v2/GetBucketInfo?id=bucket-1" => { "objects" => 7, "bytes" => 7000 }
+      }
+
+      allow(Net::HTTP).to receive(:start) do |_host, _port, **_options, &block|
+        http = double("http")
+        allow(http).to receive(:request) do |request|
+          body = admin_payloads.fetch(request.path, {}).to_json
+          response = double("response")
+          allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+          allow(response).to receive(:body).and_return(body)
+          response
+        end
+        block.call(http)
+      end
+
+      stats = adapter.storage_stats
+
+      expect(stats[:bucket_bytes]).to eq(7000)
+      expect(stats[:bucket_objects]).to eq(7)
+      expect(stats[:disk_available_bytes]).to eq(60_000)
+      expect(stats[:disk_total_bytes]).to eq(100_000)
+      expect(stats[:node_capacity_bytes]).to eq(120_000)
+    end
   end
 
   context "when S3_FOLDER_PREFIX is configured" do

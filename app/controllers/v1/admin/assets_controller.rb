@@ -258,24 +258,6 @@ class V1::Admin::AssetsController < V1::ApplicationController
     )
   end
 
-  # GET /v1/admin/assets/storage_stats
-  def read_storage_stats
-    stats = StorageService::Client.storage_stats
-    db_count = Asset.kept.count
-    db_bytes = Asset.kept.sum(:size_bytes)
-
-    render_json_response(
-      status_code: 200,
-      message: admin_asset_message(MessageService::Admin::Asset::STORAGE_STATS_RETRIEVED),
-      data: {
-        stats: stats.merge(
-          db_assets_count: db_count,
-          db_assets_bytes: db_bytes
-        )
-      }
-    )
-  end
-
   # DELETE /v1/admin/assets/:id
   def destroy
     @asset.destroy!
@@ -690,7 +672,7 @@ class V1::Admin::AssetsController < V1::ApplicationController
 
     pattern = "%#{ActiveRecord::Base.sanitize_sql_like(search)}%"
     scope.where(
-      "assets.name ILIKE :search OR assets.storage_key ILIKE :search OR assets.assetable_type ILIKE :search",
+      "assets.name ILIKE :search OR assets.title ILIKE :search OR assets.storage_key ILIKE :search OR assets.assetable_type ILIKE :search",
       search: pattern
     )
   end

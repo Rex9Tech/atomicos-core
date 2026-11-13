@@ -253,9 +253,6 @@ module StorageService
     end
 
     def storage_stats
-      admin_endpoint = AppConfig::S3_ADMIN_ENDPOINT
-      admin_token = AppConfig::S3_ADMIN_TOKEN
-
       require "net/http"
       require "json"
 
@@ -263,57 +260,34 @@ module StorageService
       disk_total = 0
       node_capacity = 0
 
-      # 1. Query Node & Cluster Status
+      # 1. Query Node & Cluster Status (Garage v2 admin API; v1 fallback for
+      #    nodes still running the old admin API).
       begin
-        status_uri = URI("#{admin_endpoint}/v1/status")
-        status_req = Net::HTTP::Get.new(status_uri)
-        status_req["Authorization"] = "Bearer #{admin_token}"
-
-        status_res = Net::HTTP.start(status_uri.host, status_uri.port, open_timeout: 2, read_timeout: 3) do |http|
-          http.request(status_req)
-        end
-
-        if status_res.is_a?(Net::HTTPSuccess)
-          status_data = JSON.parse(status_res.body)
-          node = status_data["nodes"]&.first
-          if node
-            disk_avail = node.dig("dataPartition", "available").to_i
-            disk_total = node.dig("dataPartition", "total").to_i
-            node_capacity = node.dig("role", "capacity").to_i
-          end
+        status_data = admin_json("/v2/GetClusterStatus") || admin_json("/v1/status")
+        node = status_data && status_data["nodes"]&.first
+        if node
+          disk_avail = node.dig("dataPartition", "available").to_i
+          disk_total = node.dig("dataPartition", "total").to_i
+          node_capacity = node.dig("role", "capacity").to_i
         end
       rescue => e
         Rails.logger.warn("#{LOG_PREFIX} Could not fetch cluster status: #{e.message}")
       end
 
-      # 2. Query Bucket Stats
+      # 2. Query Bucket Stats (Garage v2 admin API; v1 fallback for
+      #    nodes still running the old admin API).
       bucket_bytes = 0
       bucket_objects = 0
 
       begin
-        bucket_search_uri = URI("#{admin_endpoint}/v1/bucket?search=#{@bucket}")
-        bucket_search_req = Net::HTTP::Get.new(bucket_search_uri)
-        bucket_search_req["Authorization"] = "Bearer #{admin_token}"
-
-        bucket_search_res = Net::HTTP.start(bucket_search_uri.host, bucket_search_uri.port, open_timeout: 2, read_timeout: 3) do |http|
-          http.request(bucket_search_req)
-        end
-
-        if bucket_search_res.is_a?(Net::HTTPSuccess)
-          buckets = JSON.parse(bucket_search_res.body)
-          bucket_info = buckets.find { |b| b["globalAliases"]&.include?(@bucket) }
-          if bucket_info && bucket_info["id"]
-            detail_uri = URI("#{admin_endpoint}/v1/bucket?id=#{bucket_info['id']}")
-            detail_req = Net::HTTP::Get.new(detail_uri)
-            detail_req["Authorization"] = "Bearer #{admin_token}"
-            detail_res = Net::HTTP.start(detail_uri.host, detail_uri.port, open_timeout: 2, read_timeout: 3) do |http|
-              http.request(detail_req)
-            end
-            if detail_res.is_a?(Net::HTTPSuccess)
-              detail = JSON.parse(detail_res.body)
-              bucket_bytes = detail["bytes"].to_i
-              bucket_objects = detail["objects"].to_i
-            end
+        buckets = admin_json("/v2/ListBuckets") || admin_json("/v1/bucket?search=#{@bucket}")
+        bucket_info = buckets&.find { |b| b["globalAliases"]&.include?(@bucket) }
+        if bucket_info && bucket_info["id"]
+          detail = admin_json("/v2/GetBucketInfo?id=#{bucket_info['id']}") ||
+                   admin_json("/v1/bucket?id=#{bucket_info['id']}")
+          if detail
+            bucket_bytes = detail["bytes"].to_i
+            bucket_objects = detail["objects"].to_i
           end
         end
       rescue => e
@@ -360,6 +334,25 @@ module StorageService
     end
 
     private
+
+    # GET a Garage admin API endpoint and parse its JSON body; returns nil when
+    # the endpoint is unreachable or rejects an unsupported path (e.g. the
+    # v1 endpoints that Garage v2 removed).
+    def admin_json(path)
+      uri = URI("#{AppConfig::S3_ADMIN_ENDPOINT}#{path}")
+      request = Net::HTTP::Get.new(uri)
+      request["Authorization"] = "Bearer #{AppConfig::S3_ADMIN_TOKEN}"
+
+      response = Net::HTTP.start(uri.host, uri.port, open_timeout: 2, read_timeout: 3) do |http|
+        http.request(request)
+      end
+      return nil unless response.is_a?(Net::HTTPSuccess)
+
+      JSON.parse(response.body)
+    rescue => e
+      Rails.logger.warn("#{LOG_PREFIX} Admin API #{path} failed: #{e.message}")
+      nil
+    end
 
     def environment_partition_stats
       ENVIRONMENT_PREFIXES.index_with do |prefix|
