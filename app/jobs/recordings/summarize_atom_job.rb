@@ -46,7 +46,11 @@ class Recordings::SummarizeAtomJob < ApplicationJob
       raise "empty summary: #{result[:error].presence || 'no response'}"
     end
 
-    atom.update!(summary_blocks: [ { "type" => "summary", "text" => summary } ])
+    parsed = Ai::SummaryParser.parse(summary)
+    atom.update!(
+      summary_blocks: [ { "type" => "summary", "text" => parsed.text } ],
+      next_meeting_at: parsed.next_meeting_at
+    )
     broadcast_atom_updated(atom)
   end
 

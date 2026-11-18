@@ -35,10 +35,12 @@ class Atoms::ProcessAssetContentJob < ApplicationJob
     summary = summarize(atom, transcript)
     raise "empty summary" if summary.blank?
 
+    parsed = Ai::SummaryParser.parse(summary)
     completion = {
       status: AtomConstants::Status::COMPLETED,
       transcript_segments: [ { "speaker" => "Speaker", "text" => transcript } ],
-      summary_blocks: [ { "type" => "summary", "text" => summary } ]
+      summary_blocks: [ { "type" => "summary", "text" => parsed.text } ],
+      next_meeting_at: parsed.next_meeting_at
     }
     # Meeting atoms carry a recording lifecycle too — complete it so the
     # recording never reads as "processing" after the server transcription.

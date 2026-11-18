@@ -74,7 +74,13 @@ module Ai
       def execute_summarize(user:, text:, profile_key: nil, request_metadata: {})
         profile = Ai::ProfileService.resolve!(profile_key)
         messages = [
-          { role: AiConstants::ChatRole::SYSTEM, content: AiConstants::AiPrompt::SUMMARIZE_MARKDOWN },
+          {
+            role: AiConstants::ChatRole::SYSTEM,
+            content: format(
+              AiConstants::AiPrompt::SUMMARIZE_MARKDOWN,
+              today: Time.zone.today.strftime("%A, %Y-%m-%d")
+            )
+          },
           { role: AiConstants::ChatRole::USER, content: text.to_s.truncate(12_000) }
         ]
         run = create_run!(user, profile, AiConstants::RunFeature::SUMMARIZE, messages, nil, request_metadata)

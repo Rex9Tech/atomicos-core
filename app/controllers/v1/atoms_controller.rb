@@ -413,13 +413,15 @@ class V1::AtomsController < V1::ApplicationController
     summary = summarize_text(atom, source_text)
     return if summary.blank?
 
+    parsed = Ai::SummaryParser.parse(summary)
     note_content = [ content.title, content.description ].compact_blank.join("\n\n")
 
     atom.update!(
       title: content.title.presence || atom.title,
       status: AtomConstants::Status::COMPLETED,
       note: note_content.presence,
-      summary_blocks: [ { "type" => "summary", "text" => summary } ],
+      summary_blocks: [ { "type" => "summary", "text" => parsed.text } ],
+      next_meeting_at: parsed.next_meeting_at,
       metadata: atom.metadata.merge("content" => source_text.truncate(20_000))
     )
   rescue StandardError => e

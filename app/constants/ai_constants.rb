@@ -4,7 +4,13 @@
 module AiConstants
   module AiPrompt
     SUMMARIZE        = "Summarize the following text concisely:".freeze
-    SUMMARIZE_MARKDOWN = "Summarize the following content into a concise, scannable markdown summary. Use a short bold heading, bullet points for key facts, and bold for important terms and numbers. Keep it tight.".freeze
+    SUMMARIZE_MARKDOWN = <<~PROMPT.freeze
+      Summarize the following content into a concise, scannable markdown summary. Use a short bold heading, bullet points for key facts, and bold for important terms and numbers. Keep it tight.
+
+      Today's date is %{today}. If the conversation mentions when the NEXT meeting will happen — an explicit date, or a relative day such as "next Tuesday" or "tomorrow" — resolve it against today's date and append EXACTLY ONE final line in this exact format:
+      Next meeting: YYYY-MM-DD HH:MM
+      Use 24-hour time; if only a date is known, use 09:00. If no next meeting is mentioned, do NOT add this line.
+    PROMPT
     TRANSLATE        = "Translate the following text to %{language}:".freeze
     DEFAULT_ANALYSIS = "sentiment".freeze
     DECISIONS        = "You are a meeting assistant. Extract the key decisions and action items from the following content. Return ONLY a JSON object with a 'decisions' array; each item has 'title' (the decision) and 'detail' (context). No text outside the JSON.".freeze
