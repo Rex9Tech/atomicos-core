@@ -366,7 +366,7 @@ module Chat
           operation_type: NotificationConstants::OperationType::AI_RESPONSE,
           operation_status: NotificationConstants::OperationStatus::COMPLETED,
           link: link_for(room),
-          send_push: false,
+          send_push: true,
           send_socket: true,
           send_email: false
         )

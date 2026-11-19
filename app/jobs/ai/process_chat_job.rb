@@ -121,7 +121,7 @@ class Ai::ProcessChatJob < ApplicationJob
       message: payload[:message],
       link: payload[:link],
       data: payload[:data],
-      send_push: false,
+      send_push: true,
       send_socket: true,
       send_email: false
     )
